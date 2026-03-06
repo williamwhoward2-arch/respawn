@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -18,6 +24,12 @@ type Exercise = {
   favorite?: boolean;
 };
 
+type LibraryExercise = {
+  name: string;
+  bodyPart: string;
+  custom?: boolean;
+};
+
 type GeneratedWorkoutPayload = {
   workout_name: string;
   body_part: string;
@@ -33,7 +45,7 @@ type GeneratedWorkoutPayload = {
   }[];
 };
 
-const EXERCISE_LIBRARY = [
+const BASE_EXERCISE_LIBRARY: LibraryExercise[] = [
   { name: "Bench Press", bodyPart: "Chest" },
   { name: "Incline Bench Press", bodyPart: "Chest" },
   { name: "Machine Chest Press", bodyPart: "Chest" },
@@ -116,9 +128,47 @@ function formatBodyPart(value: string) {
   }
 }
 
-function toNumber(value: string | null | undefined) {
+function toNumber(value: string | number | null | undefined) {
   const num = Number(value);
   return Number.isFinite(num) ? num : 0;
+}
+
+function normalizeName(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function getMostLikelyWeight(exerciseName: string, exercises: Exercise[]) {
+  for (const exercise of exercises) {
+    if (normalizeName(exercise.name) !== normalizeName(exerciseName)) continue;
+
+    for (let i = exercise.sets.length - 1; i >= 0; i -= 1) {
+      const set = exercise.sets[i];
+      if (String(set.weight).trim() !== "") {
+        return String(set.weight);
+      }
+    }
+  }
+
+  return "";
+}
+
+function getMostLikelyReps(
+  exerciseName: string,
+  exercises: Exercise[],
+  fallback = ""
+) {
+  for (const exercise of exercises) {
+    if (normalizeName(exercise.name) !== normalizeName(exerciseName)) continue;
+
+    for (let i = exercise.sets.length - 1; i >= 0; i -= 1) {
+      const set = exercise.sets[i];
+      if (String(set.reps).trim() !== "") {
+        return String(set.reps);
+      }
+    }
+  }
+
+  return fallback;
 }
 
 export default function WorkoutPage() {
@@ -134,19 +184,27 @@ export default function WorkoutPage() {
 
   const [recentExercises, setRecentExercises] = useState<string[]>([]);
   const [favoriteExercises, setFavoriteExercises] = useState<string[]>([]);
+  const [customLibrary, setCustomLibrary] = useState<LibraryExercise[]>([]);
   const [workoutTitle, setWorkoutTitle] = useState("Build Your Session");
 
   const [exercises, setExercises] = useState<Exercise[]>([]);
 
+  const exerciseCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
   useEffect(() => {
     const savedRecent = localStorage.getItem("respawn_recent_exercises");
     const savedFavorites = localStorage.getItem("respawn_favorite_exercises");
+    const savedCustomLibrary = localStorage.getItem("respawn_custom_exercise_library");
 
     const parsedRecent: string[] = savedRecent ? JSON.parse(savedRecent) : [];
     const parsedFavorites: string[] = savedFavorites ? JSON.parse(savedFavorites) : [];
+    const parsedCustomLibrary: LibraryExercise[] = savedCustomLibrary
+      ? JSON.parse(savedCustomLibrary)
+      : [];
 
     setRecentExercises(parsedRecent);
     setFavoriteExercises(parsedFavorites);
+    setCustomLibrary(parsedCustomLibrary);
 
     const rawGeneratedWorkout = localStorage.getItem("respawn_generated_workout");
 
@@ -198,14 +256,36 @@ export default function WorkoutPage() {
   }, [recentExercises]);
 
   useEffect(() => {
-    localStorage.setItem("respawn_favorite_exercises", JSON.stringify(favoriteExercises));
+    localStorage.setItem(
+      "respawn_favorite_exercises",
+      JSON.stringify(favoriteExercises)
+    );
   }, [favoriteExercises]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      "respawn_custom_exercise_library",
+      JSON.stringify(customLibrary)
+    );
+  }, [customLibrary]);
+
+  const allExerciseLibrary = useMemo(() => {
+    const merged = [...customLibrary, ...BASE_EXERCISE_LIBRARY];
+    const seen = new Set<string>();
+
+    return merged.filter((item) => {
+      const key = normalizeName(item.name);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [customLibrary]);
 
   const libraryMap = useMemo(() => {
     const map = new Map<string, string>();
-    EXERCISE_LIBRARY.forEach((item) => map.set(item.name, item.bodyPart));
+    allExerciseLibrary.forEach((item) => map.set(item.name, item.bodyPart));
     return map;
-  }, []);
+  }, [allExerciseLibrary]);
 
   const completedSets = useMemo(() => {
     return exercises.flatMap((exercise) =>
@@ -307,12 +387,22 @@ export default function WorkoutPage() {
     setExercises((prev) => {
       const updated = [...prev];
       const exercise = { ...updated[exerciseIndex] };
-      exercise.sets = [...exercise.sets, { weight: "", reps: "", completed: false }];
+      const previousSet = exercise.sets[exercise.sets.length - 1];
+
+      exercise.sets = [
+        ...exercise.sets,
+        {
+          weight: previousSet?.weight ?? "",
+          reps: previousSet?.reps ?? "",
+          completed: false,
+        },
+      ];
+
       updated[exerciseIndex] = exercise;
       return updated;
     });
 
-    setStatus("Set added.");
+    setStatus("Set added and copied from previous set.");
   }
 
   function removeSet(exerciseIndex: number, setIndex: number) {
@@ -335,9 +425,20 @@ export default function WorkoutPage() {
   function resetExerciseSets(exerciseIndex: number) {
     setExercises((prev) => {
       const updated = [...prev];
+      const exercise = updated[exerciseIndex];
+
+      const defaultWeight = getMostLikelyWeight(exercise.name, prev);
+      const defaultReps = getMostLikelyReps(exercise.name, prev);
+
       updated[exerciseIndex] = {
-        ...updated[exerciseIndex],
-        sets: [{ weight: "", reps: "", completed: false }],
+        ...exercise,
+        sets: [
+          {
+            weight: defaultWeight,
+            reps: defaultReps,
+            completed: false,
+          },
+        ],
       };
       return updated;
     });
@@ -361,37 +462,79 @@ export default function WorkoutPage() {
     });
   }
 
+  function saveCustomExerciseToLibrary(name: string, bodyPart: string) {
+    const cleanName = name.trim();
+    if (!cleanName) return;
+
+    const alreadyExistsInBase = BASE_EXERCISE_LIBRARY.some(
+      (item) => normalizeName(item.name) === normalizeName(cleanName)
+    );
+
+    if (alreadyExistsInBase) return;
+
+    setCustomLibrary((prev) => {
+      const exists = prev.some(
+        (item) => normalizeName(item.name) === normalizeName(cleanName)
+      );
+
+      if (exists) return prev;
+
+      return [
+        { name: cleanName, bodyPart: bodyPart || "Other", custom: true },
+        ...prev,
+      ];
+    });
+  }
+
   function addExerciseFromInput(name: string, bodyPart: string) {
     const cleanName = name.trim();
+    const cleanBodyPart = bodyPart || "Other";
 
     if (!cleanName) {
       setStatus("Enter an exercise name.");
       return;
     }
 
-    const exists = exercises.some(
-      (ex) => ex.name.toLowerCase() === cleanName.toLowerCase()
+    const existsInWorkout = exercises.some(
+      (ex) => normalizeName(ex.name) === normalizeName(cleanName)
     );
 
-    if (exists) {
+    if (existsInWorkout) {
       setStatus("That exercise is already in this workout.");
       return;
     }
 
+    const defaultWeight = getMostLikelyWeight(cleanName, exercises);
+    const defaultReps = getMostLikelyReps(cleanName, exercises);
+
     const newExercise: Exercise = {
       id: makeId(),
       name: cleanName,
-      bodyPart: bodyPart || "Other",
-      sets: [{ weight: "", reps: "", completed: false }],
+      bodyPart: cleanBodyPart,
+      sets: [
+        {
+          weight: defaultWeight,
+          reps: defaultReps,
+          completed: false,
+        },
+      ],
       favorite: favoriteExercises.includes(cleanName),
     };
 
-    setExercises((prev) => [...prev, newExercise]);
+    setExercises((prev) => [newExercise, ...prev]);
+    saveCustomExerciseToLibrary(cleanName, cleanBodyPart);
     pushRecent(cleanName);
     setNewExerciseName("");
     setNewBodyPart("");
     setLibraryChoice("");
-    setStatus("Exercise added.");
+    setStatus("Exercise added at the top.");
+
+    setTimeout(() => {
+      exerciseCardRefs.current[newExercise.id]?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 80);
   }
 
   function addExercise() {
@@ -515,7 +658,9 @@ export default function WorkoutPage() {
           <p style={heroSubStyle}>
             {totalSets} sets • {totalReps} reps • {totalVolume} total volume
           </p>
-          <p style={{ ...heroSubStyle, marginTop: 8 }}>Duration {formatTime(secondsElapsed)}</p>
+          <p style={{ ...heroSubStyle, marginTop: 8 }}>
+            Duration {formatTime(secondsElapsed)}
+          </p>
         </section>
 
         <section style={cardStyle}>
@@ -658,9 +803,10 @@ export default function WorkoutPage() {
             style={selectStyle}
           >
             <option value="">Choose from library</option>
-            {EXERCISE_LIBRARY.map((exercise) => (
+            {allExerciseLibrary.map((exercise) => (
               <option key={exercise.name} value={exercise.name}>
                 {exercise.name} • {exercise.bodyPart}
+                {exercise.custom ? " • Custom" : ""}
               </option>
             ))}
           </select>
@@ -689,6 +835,10 @@ export default function WorkoutPage() {
             Add Exercise
           </button>
         </div>
+
+        <p style={helperTextStyle}>
+          New custom exercises are saved into your library automatically on this device.
+        </p>
 
         {favoriteExercises.length > 0 && (
           <div style={{ marginTop: 18 }}>
@@ -729,12 +879,19 @@ export default function WorkoutPage() {
         <section style={emptyStateCardStyle}>
           <h2 style={emptyStateTitleStyle}>No exercises added yet</h2>
           <p style={emptyStateTextStyle}>
-            Start by adding an exercise above. Then log weight, reps, and confirm each completed set.
+            Start by adding an exercise above. Then log weight, reps, and confirm
+            each completed set.
           </p>
         </section>
       ) : (
         exercises.map((exercise, index) => (
-          <section key={exercise.id} style={exerciseCardStyle}>
+          <section
+            key={exercise.id}
+            style={exerciseCardStyle}
+            ref={(node) => {
+              exerciseCardRefs.current[exercise.id] = node;
+            }}
+          >
             <div style={exerciseTopRowStyle}>
               <div>
                 <h2 style={exerciseTitleStyle}>{exercise.name}</h2>
@@ -754,10 +911,7 @@ export default function WorkoutPage() {
                 >
                   Reset Sets
                 </button>
-                <button
-                  onClick={() => removeExercise(index)}
-                  style={dangerButtonStyle}
-                >
+                <button onClick={() => removeExercise(index)} style={dangerButtonStyle}>
                   Remove
                 </button>
               </div>
@@ -777,6 +931,7 @@ export default function WorkoutPage() {
                       updateSetField(index, setIndex, "weight", e.target.value)
                     }
                     style={smallInputStyle}
+                    inputMode="decimal"
                   />
 
                   <input
@@ -786,6 +941,7 @@ export default function WorkoutPage() {
                       updateSetField(index, setIndex, "reps", e.target.value)
                     }
                     style={smallInputStyle}
+                    inputMode="numeric"
                   />
 
                   <button
@@ -1145,6 +1301,13 @@ const mutedStyle: CSSProperties = {
 const statusStyle: CSSProperties = {
   color: "#cccccc",
   marginBottom: "16px",
+};
+
+const helperTextStyle: CSSProperties = {
+  color: "#8f8f8f",
+  fontSize: "13px",
+  marginTop: "12px",
+  marginBottom: 0,
 };
 
 const finishButtonStyle: CSSProperties = {
