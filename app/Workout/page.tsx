@@ -189,7 +189,7 @@ export default function WorkoutPage() {
 
   const [exercises, setExercises] = useState<Exercise[]>([]);
 
-  const exerciseCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const exerciseCardRefs = useRef<Record<string, HTMLElement | null>>({});
 
   useEffect(() => {
     const savedRecent = localStorage.getItem("respawn_recent_exercises");
