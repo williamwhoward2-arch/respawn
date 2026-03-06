@@ -1,7 +1,7 @@
 import {
   exerciseLibrary,
   type Goal,
-  type BodyPart,
+  type BodyPart as ImportedBodyPart,
   type ExperienceLevel,
   type EquipmentAccess,
   type Exercise,
@@ -10,6 +10,12 @@ import {
   type Muscle,
   type WorkoutTag,
 } from "./workoutGeneratorData";
+
+type SupportedBodyPart =
+  | ImportedBodyPart
+  | "push"
+  | "pull"
+  | "full_body";
 
 export type GeneratedSet = {
   set_number: number;
@@ -31,7 +37,7 @@ export type GeneratedWorkout = {
 };
 
 type GenerateWorkoutInput = {
-  bodyPart: BodyPart;
+  bodyPart: SupportedBodyPart;
   goal: Goal;
   duration: number;
   experienceLevel: ExperienceLevel;
@@ -76,7 +82,7 @@ const experienceRank: Record<ExperienceLevel, number> = {
   advanced: 3,
 };
 
-function shuffleArray<T>(array: T[]) {
+function shuffleArray<T>(array: T[]): T[] {
   const copy = [...array];
   for (let i = copy.length - 1; i > 0; i -= 1) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -85,14 +91,14 @@ function shuffleArray<T>(array: T[]) {
   return copy;
 }
 
-function getExerciseCount(duration: number, level: ExperienceLevel) {
+function getExerciseCount(duration: number, level: ExperienceLevel): number {
   if (duration <= 30) return level === "advanced" ? 4 : 3;
   if (duration <= 45) return level === "advanced" ? 5 : 4;
   if (duration <= 60) return level === "advanced" ? 6 : 5;
   return level === "advanced" ? 7 : 6;
 }
 
-function getSetAdjustment(level: ExperienceLevel) {
+function getSetAdjustment(level: ExperienceLevel): number {
   return level === "advanced" ? 1 : 0;
 }
 
@@ -104,7 +110,7 @@ function buildSets(baseSets: number, reps: string): GeneratedSet[] {
   }));
 }
 
-function getWorkoutRules(bodyPart: BodyPart): WorkoutRules {
+function getWorkoutRules(bodyPart: SupportedBodyPart): WorkoutRules {
   switch (bodyPart) {
     case "chest":
       return {
@@ -224,13 +230,13 @@ function getWorkoutRules(bodyPart: BodyPart): WorkoutRules {
 function isExerciseAllowedForLevel(
   exercise: Exercise,
   experienceLevel: ExperienceLevel
-) {
+): boolean {
   return exercise.levels.some(
     (level) => experienceRank[level] <= experienceRank[experienceLevel]
   );
 }
 
-function strictMatch(exercise: Exercise, rules: WorkoutRules) {
+function strictMatch(exercise: Exercise, rules: WorkoutRules): boolean {
   const matchesPrimary = rules.targetMuscles.includes(exercise.primaryMuscle);
   const matchesSecondary = exercise.secondaryMuscles.some((muscle) =>
     rules.targetMuscles.includes(muscle)
@@ -242,7 +248,7 @@ function strictMatch(exercise: Exercise, rules: WorkoutRules) {
   return matchesPrimary || matchesSecondary || matchesTag;
 }
 
-function looseMatch(exercise: Exercise, bodyPart: BodyPart) {
+function looseMatch(exercise: Exercise, bodyPart: SupportedBodyPart): boolean {
   switch (bodyPart) {
     case "chest":
       return ["chest", "front_delts", "triceps"].includes(exercise.primaryMuscle);
@@ -285,7 +291,7 @@ function pickByPattern(
   pattern: MovementPattern,
   pool: Exercise[],
   usedNames: Set<string>
-) {
+): Exercise | null {
   const exact = shuffleArray(
     pool.filter(
       (exercise) =>
@@ -296,7 +302,7 @@ function pickByPattern(
   return exact[0] ?? null;
 }
 
-function pickAny(pool: Exercise[], usedNames: Set<string>) {
+function pickAny(pool: Exercise[], usedNames: Set<string>): Exercise | null {
   const available = shuffleArray(
     pool.filter((exercise) => !usedNames.has(exercise.name))
   );
@@ -305,7 +311,7 @@ function pickAny(pool: Exercise[], usedNames: Set<string>) {
 
 function getDisplayBodyPart(
   exercise: Exercise,
-  requestedBodyPart: BodyPart
+  requestedBodyPart: SupportedBodyPart
 ): string {
   if (requestedBodyPart === "push") {
     if (exercise.primaryMuscle === "chest") return "chest";
@@ -380,7 +386,7 @@ function getDisplayBodyPart(
   }
 }
 
-function dedupeByName(exercises: Exercise[]) {
+function dedupeByName(exercises: Exercise[]): Exercise[] {
   const seen = new Set<string>();
 
   return exercises.filter((exercise) => {
@@ -390,8 +396,8 @@ function dedupeByName(exercises: Exercise[]) {
   });
 }
 
-function getWorkoutTitle(bodyPart: BodyPart, goal: Goal) {
-  const workoutTitleMap: Record<BodyPart, string> = {
+function getWorkoutTitle(bodyPart: SupportedBodyPart, goal: Goal): string {
+  const workoutTitleMap: Record<SupportedBodyPart, string> = {
     chest: "Chest Day",
     back: "Back Day",
     legs: "Leg Day",
