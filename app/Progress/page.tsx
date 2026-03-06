@@ -16,14 +16,14 @@ type WorkoutSet = {
   exercise_name: string | null;
   body_part?: string | null;
   set_number: number | null;
-  weight: string | null;
-  reps: string | null;
+  weight: string | number | null;
+  reps: string | number | null;
   created_at: string;
 };
 
 type Profile = {
   name: string | null;
-  bodyweight: string | null;
+  bodyweight: string | number | null;
   goal: string | null;
   focus?: string | null;
   experience_level?: string | null;
@@ -35,34 +35,35 @@ type BodyPartSummary = {
   volume: number;
 };
 
-function toNumber(value: string | null | undefined) {
+function toNumber(value: string | number | null | undefined): number {
+  if (value === null || value === undefined || value === "") return 0;
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 }
 
-function estimate1RM(weight: number, reps: number) {
+function estimate1RM(weight: number, reps: number): number {
   if (!weight || !reps) return 0;
   return weight * (1 + reps / 30);
 }
 
-function formatDateTime(iso: string) {
+function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString();
 }
 
-function formatDuration(seconds?: number | null) {
+function formatDuration(seconds?: number | null): string {
   if (!seconds) return "--";
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
   return `${mins}m ${secs}s`;
 }
 
-function titleCase(value: string) {
+function titleCase(value: string): string {
   return value
     .replaceAll("_", " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function normalizeBodyPart(value: string | null | undefined) {
+function normalizeBodyPart(value: string | null | undefined): string {
   if (!value) return "Other";
 
   const cleaned = value.toLowerCase();
@@ -179,11 +180,14 @@ export default function ProgressPage() {
     const recentSets = validSets.filter((set) => recentWorkoutIds.has(set.workout_id));
 
     const bodyPartMap = new Map<string, { sets: number; volume: number }>();
+
     for (const set of recentSets) {
       const bodyPart = normalizeBodyPart(set.body_part);
       const current = bodyPartMap.get(bodyPart) ?? { sets: 0, volume: 0 };
+
       current.sets += 1;
       current.volume += toNumber(set.weight) * toNumber(set.reps);
+
       bodyPartMap.set(bodyPart, current);
     }
 
@@ -231,6 +235,7 @@ export default function ProgressPage() {
     );
 
     const exerciseFrequencyMap = new Map<string, number>();
+
     for (const set of recentSets) {
       const name = set.exercise_name || "Unknown";
       exerciseFrequencyMap.set(name, (exerciseFrequencyMap.get(name) ?? 0) + 1);
@@ -247,7 +252,9 @@ export default function ProgressPage() {
             recentWorkouts.reduce(
               (sum, workout) => sum + toNumber(workout.duration_seconds),
               0
-            ) / recentWorkouts.length / 60
+            ) /
+              recentWorkouts.length /
+              60
           )
         : 0;
 
