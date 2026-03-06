@@ -84,7 +84,7 @@ const experienceRank: Record<ExperienceLevel, number> = {
 
 function shuffleArray<T>(array: T[]): T[] {
   const copy = [...array];
-  for (let i = copy.length - 1; i > 0; i -= 1) {
+  for (let i = copy.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [copy[i], copy[j]] = [copy[j], copy[i]];
   }
@@ -139,67 +139,41 @@ function getWorkoutRules(bodyPart: SupportedBodyPart): WorkoutRules {
     case "legs":
       return {
         targetMuscles: ["quads", "glutes", "hamstrings", "calves"],
-        preferredTags: ["lower", "full_body", "glute_friendly"],
-        template: ["squat", "hinge", "lunge", "squat", "calves"],
+        preferredTags: ["lower", "full_body"],
+        template: ["squat", "hinge", "lunge", "calves"],
       };
 
     case "shoulders":
       return {
-        targetMuscles: [
-          "shoulders",
-          "front_delts",
-          "side_delts",
-          "rear_delts",
-          "triceps",
-        ],
-        preferredTags: ["push", "pull", "upper", "full_body"],
-        template: ["vertical_press", "raise", "raise", "raise"],
+        targetMuscles: ["shoulders", "front_delts", "side_delts", "rear_delts"],
+        preferredTags: ["push", "upper"],
+        template: ["vertical_press", "raise", "raise"],
       };
 
     case "arms":
       return {
         targetMuscles: ["biceps", "triceps", "forearms"],
         preferredTags: ["push", "pull", "upper"],
-        template: ["curl", "curl", "tricep_extension", "tricep_extension"],
+        template: ["curl", "tricep_extension", "curl"],
       };
 
     case "push":
       return {
-        targetMuscles: [
-          "chest",
-          "shoulders",
-          "front_delts",
-          "triceps",
-          "side_delts",
-        ],
-        preferredTags: ["push", "upper", "full_body"],
+        targetMuscles: ["chest", "shoulders", "triceps"],
+        preferredTags: ["push", "upper"],
         template: [
           "horizontal_press",
           "vertical_press",
           "raise",
           "tricep_extension",
-          "bodyweight_push",
         ],
       };
 
     case "pull":
       return {
-        targetMuscles: [
-          "back",
-          "lats",
-          "upper_back",
-          "rear_delts",
-          "biceps",
-          "forearms",
-        ],
-        preferredTags: ["pull", "upper", "full_body"],
-        template: [
-          "vertical_pull",
-          "horizontal_pull",
-          "horizontal_pull",
-          "curl",
-          "raise",
-        ],
+        targetMuscles: ["back", "lats", "biceps"],
+        preferredTags: ["pull", "upper"],
+        template: ["vertical_pull", "horizontal_pull", "curl"],
       };
 
     case "full_body":
@@ -210,103 +184,18 @@ function getWorkoutRules(bodyPart: SupportedBodyPart): WorkoutRules {
           "hamstrings",
           "chest",
           "back",
-          "lats",
           "shoulders",
-          "core",
         ],
-        preferredTags: ["full_body", "upper", "lower", "push", "pull"],
+        preferredTags: ["full_body"],
         template: [
           "squat",
           "hinge",
           "horizontal_press",
           "horizontal_pull",
           "vertical_pull",
-          "core",
         ],
       };
   }
-}
-
-function isExerciseAllowedForLevel(
-  exercise: Exercise,
-  experienceLevel: ExperienceLevel
-): boolean {
-  return exercise.levels.some(
-    (level) => experienceRank[level] <= experienceRank[experienceLevel]
-  );
-}
-
-function strictMatch(exercise: Exercise, rules: WorkoutRules): boolean {
-  const matchesPrimary = rules.targetMuscles.includes(exercise.primaryMuscle);
-  const matchesSecondary = exercise.secondaryMuscles.some((muscle) =>
-    rules.targetMuscles.includes(muscle)
-  );
-  const matchesTag = exercise.workoutTags.some((tag) =>
-    rules.preferredTags.includes(tag)
-  );
-
-  return matchesPrimary || matchesSecondary || matchesTag;
-}
-
-function looseMatch(exercise: Exercise, bodyPart: SupportedBodyPart): boolean {
-  switch (bodyPart) {
-    case "chest":
-      return ["chest", "front_delts", "triceps"].includes(exercise.primaryMuscle);
-
-    case "back":
-      return [
-        "back",
-        "lats",
-        "upper_back",
-        "lower_back",
-        "rear_delts",
-        "biceps",
-      ].includes(exercise.primaryMuscle);
-
-    case "legs":
-      return ["quads", "glutes", "hamstrings", "calves"].includes(
-        exercise.primaryMuscle
-      );
-
-    case "shoulders":
-      return ["shoulders", "front_delts", "side_delts", "rear_delts"].includes(
-        exercise.primaryMuscle
-      );
-
-    case "arms":
-      return ["biceps", "triceps", "forearms"].includes(exercise.primaryMuscle);
-
-    case "push":
-      return exercise.workoutTags.includes("push");
-
-    case "pull":
-      return exercise.workoutTags.includes("pull");
-
-    case "full_body":
-      return true;
-  }
-}
-
-function pickByPattern(
-  pattern: MovementPattern,
-  pool: Exercise[],
-  usedNames: Set<string>
-): Exercise | null {
-  const exact = shuffleArray(
-    pool.filter(
-      (exercise) =>
-        exercise.movementPattern === pattern && !usedNames.has(exercise.name)
-    )
-  );
-
-  return exact[0] ?? null;
-}
-
-function pickAny(pool: Exercise[], usedNames: Set<string>): Exercise | null {
-  const available = shuffleArray(
-    pool.filter((exercise) => !usedNames.has(exercise.name))
-  );
-  return available[0] ?? null;
 }
 
 function getDisplayBodyPart(
@@ -315,55 +204,21 @@ function getDisplayBodyPart(
 ): string {
   if (requestedBodyPart === "push") {
     if (exercise.primaryMuscle === "chest") return "chest";
-    if (
-      ["shoulders", "front_delts", "side_delts", "rear_delts"].includes(
-        exercise.primaryMuscle
-      )
-    ) {
-      return "shoulders";
-    }
     if (exercise.primaryMuscle === "triceps") return "arms";
-    return "push";
+    return "shoulders";
   }
 
   if (requestedBodyPart === "pull") {
-    if (
-      ["back", "lats", "upper_back", "lower_back"].includes(
-        exercise.primaryMuscle
-      )
-    ) {
-      return "back";
-    }
-    if (exercise.primaryMuscle === "rear_delts") return "shoulders";
-    if (["biceps", "forearms"].includes(exercise.primaryMuscle)) return "arms";
-    return "pull";
+    if (["back", "lats"].includes(exercise.primaryMuscle)) return "back";
+    return "arms";
   }
 
   if (requestedBodyPart === "full_body") {
-    if (["quads", "hamstrings", "calves"].includes(exercise.primaryMuscle)) {
+    if (["quads", "hamstrings", "glutes"].includes(exercise.primaryMuscle))
       return "legs";
-    }
-    if (exercise.primaryMuscle === "glutes") return "glutes";
-    if (exercise.primaryMuscle === "core") return "core";
     if (exercise.primaryMuscle === "chest") return "chest";
-    if (
-      ["back", "lats", "upper_back", "lower_back"].includes(
-        exercise.primaryMuscle
-      )
-    ) {
-      return "back";
-    }
-    if (
-      ["shoulders", "front_delts", "side_delts", "rear_delts"].includes(
-        exercise.primaryMuscle
-      )
-    ) {
-      return "shoulders";
-    }
-    if (["biceps", "triceps", "forearms"].includes(exercise.primaryMuscle)) {
-      return "arms";
-    }
-    return "full_body";
+    if (["back", "lats"].includes(exercise.primaryMuscle)) return "back";
+    return "shoulders";
   }
 
   switch (requestedBodyPart) {
@@ -372,32 +227,18 @@ function getDisplayBodyPart(
     case "back":
       return "back";
     case "legs":
-      return exercise.primaryMuscle === "glutes" ? "glutes" : "legs";
+      return "legs";
     case "shoulders":
       return "shoulders";
     case "arms":
       return "arms";
-    case "push":
-      return "push";
-    case "pull":
-      return "pull";
-    case "full_body":
+    default:
       return "full_body";
   }
 }
 
-function dedupeByName(exercises: Exercise[]): Exercise[] {
-  const seen = new Set<string>();
-
-  return exercises.filter((exercise) => {
-    if (seen.has(exercise.name)) return false;
-    seen.add(exercise.name);
-    return true;
-  });
-}
-
 function getWorkoutTitle(bodyPart: SupportedBodyPart, goal: Goal): string {
-  const workoutTitleMap: Record<SupportedBodyPart, string> = {
+  const map: Record<SupportedBodyPart, string> = {
     chest: "Chest Day",
     back: "Back Day",
     legs: "Leg Day",
@@ -408,11 +249,9 @@ function getWorkoutTitle(bodyPart: SupportedBodyPart, goal: Goal): string {
     full_body: "Full Body",
   };
 
-  const goalLabel = goal
-    .replace("_", " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+  const goalLabel = goal.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
-  return `${workoutTitleMap[bodyPart]} • ${goalLabel}`;
+  return `${map[bodyPart]} • ${goalLabel}`;
 }
 
 export function generateWorkout({
@@ -429,69 +268,27 @@ export function generateWorkout({
 
   const basePool = exerciseLibrary.filter((exercise) => {
     const matchesEquipment = exercise.equipmentAccess.includes(equipmentAccess);
-    const matchesLevel = isExerciseAllowedForLevel(exercise, experienceLevel);
+    const matchesLevel = exercise.levels.some(
+      (level) => experienceRank[level] <= experienceRank[experienceLevel]
+    );
     return matchesEquipment && matchesLevel;
   });
 
-  if (basePool.length === 0) {
-    throw new Error(
-      "No exercises are available for that equipment and experience level yet."
-    );
-  }
+  const selected = shuffleArray(basePool).slice(0, exerciseCount);
 
-  let filteredPool = basePool.filter((exercise) => strictMatch(exercise, rules));
+  const generatedExercises: GeneratedExercise[] = selected.map((exercise) => {
+    const template = scheme[exercise.category];
+    const totalSets =
+      exercise.category === "main"
+        ? template.sets + setAdjustment
+        : template.sets;
 
-  if (filteredPool.length === 0) {
-    filteredPool = basePool.filter((exercise) => looseMatch(exercise, bodyPart));
-  }
-
-  if (filteredPool.length === 0) {
-    filteredPool = basePool;
-  }
-
-  const selected: Exercise[] = [];
-  const usedNames = new Set<string>();
-
-  for (const pattern of rules.template) {
-    if (selected.length >= exerciseCount) break;
-
-    const picked = pickByPattern(pattern, filteredPool, usedNames);
-
-    if (picked) {
-      selected.push(picked);
-      usedNames.add(picked.name);
-    }
-  }
-
-  while (selected.length < exerciseCount) {
-    const fallback = pickAny(filteredPool, usedNames);
-    if (!fallback) break;
-
-    selected.push(fallback);
-    usedNames.add(fallback.name);
-  }
-
-  const finalExercises = dedupeByName(selected).slice(0, exerciseCount);
-
-  if (finalExercises.length === 0) {
-    throw new Error("No exercises matched the selected filters.");
-  }
-
-  const generatedExercises: GeneratedExercise[] = finalExercises.map(
-    (exercise) => {
-      const template = scheme[exercise.category];
-      const totalSets =
-        exercise.category === "main"
-          ? template.sets + setAdjustment
-          : template.sets;
-
-      return {
-        exercise_name: exercise.name,
-        body_part: getDisplayBodyPart(exercise, bodyPart),
-        sets: buildSets(totalSets, template.reps),
-      };
-    }
-  );
+    return {
+      exercise_name: exercise.name,
+      body_part: getDisplayBodyPart(exercise, bodyPart),
+      sets: buildSets(totalSets, template.reps),
+    };
+  });
 
   return {
     workout_name: getWorkoutTitle(bodyPart, goal),
