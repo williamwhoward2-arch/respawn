@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
+import { supabase } from "@/lib/supabaseClient";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard" },
@@ -12,8 +13,44 @@ const navItems = [
   { label: "Profile", href: "/Profile" },
 ];
 
+const PUBLIC_PATHS = ["/", "/login", "/signup"];
+
 export default function TopNav() {
   const pathname = usePathname();
+  const [isAuthed, setIsAuthed] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+
+  useEffect(() => {
+    void checkAuth();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsAuthed(Boolean(session?.user));
+      setCheckingAuth(false);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  async function checkAuth() {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    setIsAuthed(Boolean(user));
+    setCheckingAuth(false);
+  }
+
+  if (PUBLIC_PATHS.includes(pathname)) {
+    return null;
+  }
+
+  if (checkingAuth || !isAuthed) {
+    return null;
+  }
 
   return (
     <nav style={navStyle}>

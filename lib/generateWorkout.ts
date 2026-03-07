@@ -11,22 +11,45 @@ import {
   type WorkoutTag,
 } from "./workoutGeneratorData";
 
+type OptionalEnhancedExerciseFields = {
+  fatigueCost?: number;
+  complexity?: number;
+  jointStress?: "low" | "moderate" | "high";
+  jointStressAreas?: string[];
+  progressionType?: string;
+  biomechanicalPattern?: string;
+  emphasis?: string[];
+  isPrimaryCompound?: boolean;
+  isStable?: boolean;
+};
+
+type EnhancedExercise = Exercise & OptionalEnhancedExerciseFields;
+
 export type GeneratedSet = {
   set_number: number;
   weight: string;
   reps: string;
+  completed?: boolean;
 };
 
 export type GeneratedExercise = {
+  id: string;
   exercise_name: string;
   body_part: string;
   sets: GeneratedSet[];
+  coachingNote?: string;
+  reason?: string;
+  restSeconds?: number;
+  targetWeight?: number | null;
 };
 
 export type GeneratedWorkout = {
   workout_name: string;
   body_part: string;
   estimated_duration: number;
+  coachNote?: string;
+  intensityLabel?: "easy" | "moderate" | "hard";
+  progressionAdvice?: string[];
   exercises: GeneratedExercise[];
 };
 
@@ -36,6 +59,10 @@ type GenerateWorkoutInput = {
   duration: number;
   experienceLevel: ExperienceLevel;
   equipmentAccess: EquipmentAccess;
+  soreAreas?: string[];
+  fatiguedAreas?: string[];
+  preferredExercises?: string[];
+  excludedExercises?: string[];
 };
 
 type WorkoutRules = {
@@ -50,27 +77,27 @@ type WorkoutRules = {
 
 const repSchemes: Record<
   Goal,
-  Record<ExerciseCategory, { sets: number; reps: string }>
+  Record<ExerciseCategory, { sets: number; reps: string; restSeconds: number }>
 > = {
   strength: {
-    main: { sets: 5, reps: "3-5" },
-    accessory: { sets: 3, reps: "5-8" },
-    isolation: { sets: 2, reps: "8-12" },
+    main: { sets: 5, reps: "3-5", restSeconds: 150 },
+    accessory: { sets: 3, reps: "5-8", restSeconds: 105 },
+    isolation: { sets: 2, reps: "8-12", restSeconds: 75 },
   },
   hypertrophy: {
-    main: { sets: 4, reps: "6-8" },
-    accessory: { sets: 3, reps: "8-12" },
-    isolation: { sets: 3, reps: "10-15" },
+    main: { sets: 4, reps: "6-8", restSeconds: 105 },
+    accessory: { sets: 3, reps: "8-12", restSeconds: 75 },
+    isolation: { sets: 3, reps: "10-15", restSeconds: 60 },
   },
   fat_loss: {
-    main: { sets: 3, reps: "8-10" },
-    accessory: { sets: 3, reps: "10-12" },
-    isolation: { sets: 2, reps: "12-15" },
+    main: { sets: 3, reps: "8-10", restSeconds: 75 },
+    accessory: { sets: 3, reps: "10-12", restSeconds: 50 },
+    isolation: { sets: 2, reps: "12-15", restSeconds: 40 },
   },
   general: {
-    main: { sets: 3, reps: "6-10" },
-    accessory: { sets: 3, reps: "8-12" },
-    isolation: { sets: 2, reps: "10-15" },
+    main: { sets: 3, reps: "6-10", restSeconds: 90 },
+    accessory: { sets: 3, reps: "8-12", restSeconds: 60 },
+    isolation: { sets: 2, reps: "10-15", restSeconds: 45 },
   },
 };
 
@@ -113,6 +140,18 @@ function shuffleArray<T>(array: T[]): T[] {
   return copy;
 }
 
+function toTitleCase(value: string): string {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function normalizeList(values?: string[]): string[] {
+  return (values ?? []).map((value) => value.trim().toLowerCase()).filter(Boolean);
+}
+
+function includesNormalized(values: string[] | undefined, target: string): boolean {
+  return normalizeList(values).includes(target.trim().toLowerCase());
+}
+
 function getExerciseCount(duration: number, level: ExperienceLevel): number {
   if (duration <= 30) return level === "advanced" ? 4 : 3;
   if (duration <= 45) return level === "advanced" ? 5 : 4;
@@ -130,6 +169,7 @@ function buildSets(baseSets: number, reps: string): GeneratedSet[] {
     set_number: index + 1,
     weight: "",
     reps,
+    completed: false,
   }));
 }
 
@@ -219,7 +259,7 @@ function getWorkoutRules(bodyPart: BodyPart): WorkoutRules {
           bodyweight_push: 1,
         },
         maxPrimaryRepeats: 2,
-        fillPriorityPatterns: ["raise", "raise", "vertical_press"],
+        fillPriorityPatterns: ["raise", "vertical_press"],
       };
 
     case "arms":
@@ -254,7 +294,7 @@ function getWorkoutRules(bodyPart: BodyPart): WorkoutRules {
           horizontal_press: 2,
           vertical_press: 1,
           fly: 1,
-          raise: 1,
+          raise: 2,
           tricep_extension: 1,
           bodyweight_push: 1,
         },
@@ -384,11 +424,14 @@ function getWorkoutTitle(bodyPart: BodyPart, goal: Goal): string {
     full_body: "Full Body",
   };
 
-  const goalLabel = goal
-    .replace("_", " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-
+  const goalLabel = goal.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
   return `${map[bodyPart]} • ${goalLabel}`;
+}
+
+function getIntensityLabel(duration: number, goal: Goal): "easy" | "moderate" | "hard" {
+  if (duration <= 30) return "easy";
+  if (goal === "strength" || duration >= 60) return "hard";
+  return "moderate";
 }
 
 function isExerciseValidForUser(
@@ -441,7 +484,10 @@ function violatesRepeatRules(
   rules: WorkoutRules
 ): boolean {
   const maxPattern = rules.maxPatternRepeats[exercise.movementPattern];
-  if (maxPattern !== undefined && getPatternCount(selected, exercise.movementPattern) >= maxPattern) {
+  if (
+    maxPattern !== undefined &&
+    getPatternCount(selected, exercise.movementPattern) >= maxPattern
+  ) {
     return true;
   }
 
@@ -499,6 +545,135 @@ function getGoalAdjustedReps(
   return defaultReps;
 }
 
+function getRestSeconds(goal: Goal, exercise: Exercise): number {
+  const base = repSchemes[goal][exercise.category].restSeconds;
+
+  if (goal === "strength") {
+    if (
+      exercise.movementPattern === "squat" ||
+      exercise.movementPattern === "hinge" ||
+      exercise.movementPattern === "horizontal_press" ||
+      exercise.movementPattern === "vertical_press"
+    ) {
+      return Math.max(base, 120);
+    }
+  }
+
+  if (goal === "fat_loss" && exercise.category === "isolation") {
+    return 40;
+  }
+
+  return base;
+}
+
+function getTargetWeightHint(exercise: Exercise): number | null {
+  const enhanced = exercise as EnhancedExercise;
+  if (enhanced.progressionType === "time_hold") return null;
+  return null;
+}
+
+function buildExerciseCoachingNote(exercise: Exercise, goal: Goal): string {
+  if (exercise.category === "main") {
+    if (goal === "strength") {
+      return "Main lift. Prioritize crisp reps, bracing, and steady force output.";
+    }
+    if (goal === "hypertrophy") {
+      return "Main movement. Push hard, but keep the eccentric controlled and clean.";
+    }
+    if (goal === "fat_loss") {
+      return "Drive effort here, but do not let form break down chasing pace.";
+    }
+    return "Main movement. Focus on clean execution and repeatable performance.";
+  }
+
+  if (exercise.category === "accessory") {
+    return "Controlled working sets. Own the range of motion and keep quality high.";
+  }
+
+  return "Isolation work. Chase tension and technique instead of ego weight.";
+}
+
+function buildExerciseReason(
+  exercise: Exercise,
+  bodyPart: BodyPart,
+  goal: Goal
+): string {
+  const displayPattern = exercise.movementPattern.replaceAll("_", " ");
+  const displayBodyPart = toTitleCase(bodyPart);
+  const displayGoal = goal.replaceAll("_", " ");
+
+  if (exercise.category === "main") {
+    return `Included as a primary ${displayPattern} to anchor your ${displayBodyPart.toLowerCase()} ${displayGoal} session.`;
+  }
+
+  if (exercise.category === "accessory") {
+    return `Supports the main work by adding quality volume for ${exercise.primaryMuscle.replaceAll(
+      "_",
+      " "
+    )}.`;
+  }
+
+  return `Adds targeted isolation volume and helps round out the session without excessive fatigue.`;
+}
+
+function buildCoachNote(params: {
+  goal: Goal;
+  bodyPart: BodyPart;
+  experienceLevel: ExperienceLevel;
+  duration: number;
+  equipmentAccess: EquipmentAccess;
+  soreAreas: string[];
+  fatiguedAreas: string[];
+}) {
+  const { goal, bodyPart, experienceLevel, duration, equipmentAccess, soreAreas, fatiguedAreas } =
+    params;
+
+  const intro =
+    goal === "strength"
+      ? "This session is built around stronger compounds and lower-rep quality work."
+      : goal === "hypertrophy"
+      ? "This session is built to create solid muscle stimulus with balanced volume."
+      : goal === "fat_loss"
+      ? "This session is built to keep density high while still preserving productive lifting."
+      : "This session balances performance, volume, and consistency.";
+
+  const context = ` Focus is ${toTitleCase(bodyPart)} for a ${duration}-minute session with ${toTitleCase(
+    equipmentAccess
+  ).toLowerCase()}. Programming is scaled for a ${experienceLevel} lifter.`;
+
+  const recovery =
+    soreAreas.length || fatiguedAreas.length
+      ? ` Recovery inputs were considered${soreAreas.length ? `, especially soreness in ${soreAreas.join(", ")}` : ""}${
+          fatiguedAreas.length ? `${soreAreas.length ? " and" : ""} fatigue around ${fatiguedAreas.join(", ")}` : ""
+        }.`
+      : "";
+
+  return `${intro}${context}${recovery}`;
+}
+
+function buildProgressionAdvice(goal: Goal, selected: Exercise[]): string[] {
+  const advice = [
+    "Try to beat last time by 1 rep on at least one or two movements.",
+    "When every set reaches the top of the rep range with clean form, increase load next session.",
+  ];
+
+  if (goal === "strength") {
+    advice.push("Leave a little in the tank on compounds instead of grinding every set to failure.");
+  } else if (goal === "hypertrophy") {
+    advice.push("Use controlled eccentrics and keep tension on the target muscle.");
+  } else if (goal === "fat_loss") {
+    advice.push("Keep rest periods honest and move with intent to maintain session density.");
+  } else {
+    advice.push("Prioritize consistency and clean reps before aggressively pushing load.");
+  }
+
+  if (selected.some((exercise) => exercise.movementPattern === "core")) {
+    advice.push("For core work, build reps or hold time before increasing difficulty.");
+  }
+
+  return advice;
+}
+
 function getExerciseScore(params: {
   exercise: Exercise;
   rules: WorkoutRules;
@@ -506,9 +681,23 @@ function getExerciseScore(params: {
   selected: Exercise[];
   bodyPart: BodyPart;
   goal: Goal;
+  soreAreas: string[];
+  fatiguedAreas: string[];
+  preferredExercises: string[];
 }): number {
-  const { exercise, rules, desiredPattern, selected, bodyPart, goal } = params;
+  const {
+    exercise,
+    rules,
+    desiredPattern,
+    selected,
+    bodyPart,
+    goal,
+    soreAreas,
+    fatiguedAreas,
+    preferredExercises,
+  } = params;
 
+  const enhanced = exercise as EnhancedExercise;
   let score = 0;
 
   if (desiredPattern && exercise.movementPattern === desiredPattern) {
@@ -528,6 +717,10 @@ function getExerciseScore(params: {
 
   if (!hasCategory(selected, "main") && exercise.category === "main") {
     score += 6;
+  }
+
+  if (preferredExercises.includes(exercise.id.toLowerCase())) {
+    score += 14;
   }
 
   if (goal === "strength") {
@@ -588,6 +781,7 @@ function getExerciseScore(params: {
   if (bodyPart === "chest" && exercise.primaryMuscle === "triceps") score -= 2;
   if (bodyPart === "back" && exercise.primaryMuscle === "biceps") score -= 2;
   if (bodyPart === "shoulders" && exercise.movementPattern === "horizontal_press") score -= 4;
+
   if (
     bodyPart === "arms" &&
     ["horizontal_press", "vertical_press", "hinge", "squat"].includes(
@@ -601,10 +795,7 @@ function getExerciseScore(params: {
     if (exercise.primaryMuscle === "calves" && selected.length < 2) {
       score -= 6;
     }
-    if (
-      selected.length < 2 &&
-      ["calves", "core"].includes(exercise.movementPattern)
-    ) {
+    if (selected.length < 2 && ["calves", "core"].includes(exercise.movementPattern)) {
       score -= 4;
     }
   }
@@ -630,6 +821,31 @@ function getExerciseScore(params: {
     score -= 10;
   }
 
+  if (
+    soreAreas.length > 0 &&
+    enhanced.jointStressAreas?.some((area) => soreAreas.includes(area.toLowerCase()))
+  ) {
+    score -= enhanced.jointStress === "high" ? 12 : enhanced.jointStress === "moderate" ? 7 : 3;
+  }
+
+  if (
+    fatiguedAreas.length > 0 &&
+    (fatiguedAreas.includes(exercise.primaryMuscle.toLowerCase()) ||
+      exercise.secondaryMuscles.some((muscle) => fatiguedAreas.includes(muscle.toLowerCase())))
+  ) {
+    score -= 8;
+  }
+
+  if (typeof enhanced.fatigueCost === "number") {
+    score -= enhanced.fatigueCost * 1.25;
+  } else {
+    if (exercise.category === "main") score -= 2;
+  }
+
+  if (enhanced.isStable && goal === "hypertrophy") {
+    score += 2;
+  }
+
   return score;
 }
 
@@ -641,8 +857,22 @@ function pickBestExercise(params: {
   desiredPattern?: MovementPattern;
   bodyPart: BodyPart;
   goal: Goal;
+  soreAreas: string[];
+  fatiguedAreas: string[];
+  preferredExercises: string[];
 }): Exercise | null {
-  const { candidates, rules, selected, usedIds, desiredPattern, bodyPart, goal } = params;
+  const {
+    candidates,
+    rules,
+    selected,
+    usedIds,
+    desiredPattern,
+    bodyPart,
+    goal,
+    soreAreas,
+    fatiguedAreas,
+    preferredExercises,
+  } = params;
 
   const available = candidates.filter(
     (exercise) =>
@@ -660,6 +890,9 @@ function pickBestExercise(params: {
       selected,
       bodyPart,
       goal,
+      soreAreas,
+      fatiguedAreas,
+      preferredExercises,
     }),
   }));
 
@@ -679,8 +912,21 @@ function fillTemplateExercises(params: {
   selected: Exercise[];
   bodyPart: BodyPart;
   goal: Goal;
+  soreAreas: string[];
+  fatiguedAreas: string[];
+  preferredExercises: string[];
 }): void {
-  const { pool, rules, usedIds, selected, bodyPart, goal } = params;
+  const {
+    pool,
+    rules,
+    usedIds,
+    selected,
+    bodyPart,
+    goal,
+    soreAreas,
+    fatiguedAreas,
+    preferredExercises,
+  } = params;
 
   for (const pattern of rules.template) {
     const exactCandidates = pool.filter((exercise) => exercise.movementPattern === pattern);
@@ -693,6 +939,9 @@ function fillTemplateExercises(params: {
       desiredPattern: pattern,
       bodyPart,
       goal,
+      soreAreas,
+      fatiguedAreas,
+      preferredExercises,
     });
 
     if (!chosen) {
@@ -711,6 +960,9 @@ function fillTemplateExercises(params: {
         desiredPattern: pattern,
         bodyPart,
         goal,
+        soreAreas,
+        fatiguedAreas,
+        preferredExercises,
       });
     }
 
@@ -767,7 +1019,10 @@ function enforceCoverage(
   usedIds: Set<string>,
   rules: WorkoutRules,
   bodyPart: BodyPart,
-  goal: Goal
+  goal: Goal,
+  soreAreas: string[],
+  fatiguedAreas: string[],
+  preferredExercises: string[]
 ): void {
   const tryAddPattern = (pattern: MovementPattern) => {
     if (hasPattern(selected, pattern)) return;
@@ -781,6 +1036,9 @@ function enforceCoverage(
       desiredPattern: pattern,
       bodyPart,
       goal,
+      soreAreas,
+      fatiguedAreas,
+      preferredExercises,
     });
 
     if (chosen) {
@@ -800,6 +1058,9 @@ function enforceCoverage(
       usedIds,
       bodyPart,
       goal,
+      soreAreas,
+      fatiguedAreas,
+      preferredExercises,
     });
 
     if (chosen) {
@@ -869,12 +1130,15 @@ function trimToTargetCount(
     const bProtected = protectedSet.has(b.movementPattern) ? 1 : 0;
 
     if (aProtected !== bProtected) return aProtected - bProtected;
+
     if (categoryPriority[a.category] !== categoryPriority[b.category]) {
       return categoryPriority[b.category] - categoryPriority[a.category];
     }
 
-    return (movementPatternPriority[b.movementPattern] ?? 999) -
-      (movementPatternPriority[a.movementPattern] ?? 999);
+    return (
+      (movementPatternPriority[b.movementPattern] ?? 999) -
+      (movementPatternPriority[a.movementPattern] ?? 999)
+    );
   });
 
   while (sortedForTrim.length > targetCount) {
@@ -892,8 +1156,22 @@ function fillRemainingExercises(params: {
   targetCount: number;
   bodyPart: BodyPart;
   goal: Goal;
+  soreAreas: string[];
+  fatiguedAreas: string[];
+  preferredExercises: string[];
 }): void {
-  const { pool, rules, selected, usedIds, targetCount, bodyPart, goal } = params;
+  const {
+    pool,
+    rules,
+    selected,
+    usedIds,
+    targetCount,
+    bodyPart,
+    goal,
+    soreAreas,
+    fatiguedAreas,
+    preferredExercises,
+  } = params;
 
   while (selected.length < targetCount) {
     const candidates = getFillCandidates(
@@ -912,6 +1190,9 @@ function fillRemainingExercises(params: {
       usedIds,
       bodyPart,
       goal,
+      soreAreas,
+      fatiguedAreas,
+      preferredExercises,
     });
 
     if (!chosen) break;
@@ -942,15 +1223,24 @@ export function generateWorkout({
   duration,
   experienceLevel,
   equipmentAccess,
+  soreAreas = [],
+  fatiguedAreas = [],
+  preferredExercises = [],
+  excludedExercises = [],
 }: GenerateWorkoutInput): GeneratedWorkout {
   const rules = getWorkoutRules(bodyPart);
   const exerciseCount = getExerciseCount(duration, experienceLevel);
   const setAdjustment = getSetAdjustment(experienceLevel, goal);
   const scheme = repSchemes[goal];
 
-  const pool = exerciseLibrary.filter((exercise) =>
-    isExerciseValidForUser(exercise, equipmentAccess, experienceLevel)
-  );
+  const normalizedSoreAreas = normalizeList(soreAreas);
+  const normalizedFatiguedAreas = normalizeList(fatiguedAreas);
+  const normalizedPreferredExercises = normalizeList(preferredExercises);
+  const normalizedExcludedExercises = normalizeList(excludedExercises);
+
+  const pool = exerciseLibrary
+    .filter((exercise) => isExerciseValidForUser(exercise, equipmentAccess, experienceLevel))
+    .filter((exercise) => !normalizedExcludedExercises.includes(exercise.id.toLowerCase()));
 
   const selected: Exercise[] = [];
   const usedIds = new Set<string>();
@@ -962,9 +1252,22 @@ export function generateWorkout({
     selected,
     bodyPart,
     goal,
+    soreAreas: normalizedSoreAreas,
+    fatiguedAreas: normalizedFatiguedAreas,
+    preferredExercises: normalizedPreferredExercises,
   });
 
-  enforceCoverage(selected, pool, usedIds, rules, bodyPart, goal);
+  enforceCoverage(
+    selected,
+    pool,
+    usedIds,
+    rules,
+    bodyPart,
+    goal,
+    normalizedSoreAreas,
+    normalizedFatiguedAreas,
+    normalizedPreferredExercises
+  );
 
   fillRemainingExercises({
     pool,
@@ -974,6 +1277,9 @@ export function generateWorkout({
     targetCount: exerciseCount,
     bodyPart,
     goal,
+    soreAreas: normalizedSoreAreas,
+    fatiguedAreas: normalizedFatiguedAreas,
+    preferredExercises: normalizedPreferredExercises,
   });
 
   const trimmedSelected = trimToTargetCount(selected, exerciseCount, bodyPart);
@@ -985,9 +1291,14 @@ export function generateWorkout({
       exercise.category === "main" ? template.sets + setAdjustment : template.sets;
 
     return {
+      id: exercise.id,
       exercise_name: exercise.name,
       body_part: getDisplayBodyPart(exercise, bodyPart),
       sets: buildSets(totalSets, getGoalAdjustedReps(goal, exercise, template.reps)),
+      coachingNote: buildExerciseCoachingNote(exercise, goal),
+      reason: buildExerciseReason(exercise, bodyPart, goal),
+      restSeconds: getRestSeconds(goal, exercise),
+      targetWeight: getTargetWeightHint(exercise),
     };
   });
 
@@ -995,6 +1306,17 @@ export function generateWorkout({
     workout_name: getWorkoutTitle(bodyPart, goal),
     body_part: bodyPart,
     estimated_duration: duration,
+    coachNote: buildCoachNote({
+      goal,
+      bodyPart,
+      experienceLevel,
+      duration,
+      equipmentAccess,
+      soreAreas: normalizedSoreAreas,
+      fatiguedAreas: normalizedFatiguedAreas,
+    }),
+    intensityLabel: getIntensityLabel(duration, goal),
+    progressionAdvice: buildProgressionAdvice(goal, orderedExercises),
     exercises: generatedExercises,
   };
 }

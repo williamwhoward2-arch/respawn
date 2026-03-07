@@ -44,10 +44,10 @@ export default function Home() {
   return (
     <main style={pageStyle}>
       <section style={heroCardStyle}>
-        <p style={eyebrowStyle}>RESPAWN FITNESS TRACKER</p>
-        <h1 style={titleStyle}>Train smarter. Track everything. Stay consistent.</h1>
+        <p style={eyebrowStyle}>RESPAWN FIT APP</p>
+        <h1 style={titleStyle}>Train smarter. Track workouts. Stay consistent.</h1>
         <p style={subtitleStyle}>
-          ReSpawn helps lifters log workouts, track momentum, monitor progress,
+          ReSpawn uses AI to help athletes log workouts, track momentum, monitor progress,
           and build consistency over time with a clean, fast experience on desktop and phone.
         </p>
 
@@ -81,9 +81,9 @@ export default function Home() {
           </div>
 
           <div style={featureCardStyle}>
-            <h2 style={featureTitleStyle}>Built for real lifters</h2>
+            <h2 style={featureTitleStyle}>Built for Performance</h2>
             <p style={featureTextStyle}>
-              Whether your goal is strength, hypertrophy, fat loss, or consistency, ReSpawn keeps it simple.
+              Whether your goal is strength, hypertrophy, fat loss, or general fitness and consistency, ReSpawn keeps it simple.
             </p>
           </div>
         </div>

@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 type Workout = {
   id: number;
+  user_id?: string | null;
   workout_name: string | null;
   created_at: string;
   duration_seconds?: number | null;
@@ -12,6 +14,7 @@ type Workout = {
 
 type WorkoutSet = {
   id: number;
+  user_id?: string | null;
   workout_id: number;
   exercise_name: string | null;
   body_part?: string | null;
@@ -22,11 +25,18 @@ type WorkoutSet = {
 };
 
 type Profile = {
+  id?: number;
+  user_id?: string | null;
   name: string | null;
   bodyweight: string | number | null;
   goal: string | null;
   focus?: string | null;
   experience_level?: string | null;
+};
+
+type AuthUser = {
+  id: string;
+  email?: string;
 };
 
 type BodyPartSummary = {
@@ -83,10 +93,14 @@ function normalizeBodyPart(value: string | null | undefined): string {
 }
 
 export default function ProgressPage() {
+  const router = useRouter();
+
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [sets, setSets] = useState<WorkoutSet[]>([]);
   const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState("");
 
   useEffect(() => {
     void loadProgress();
@@ -94,6 +108,39 @@ export default function ProgressPage() {
 
   async function loadProgress() {
     setLoading(true);
+    setStatus("Checking account...");
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError) {
+      const message = userError.message || "";
+
+      if (message.includes("Invalid Refresh Token")) {
+        await supabase.auth.signOut();
+        router.replace("/login");
+        return;
+      }
+
+      console.error("Get user error:", userError);
+      setStatus(`Error: ${message}`);
+      setLoading(false);
+      return;
+    }
+
+    if (!user) {
+      router.replace("/login");
+      return;
+    }
+
+    setAuthUser({
+      id: user.id,
+      email: user.email,
+    });
+
+    setStatus("Loading your progress...");
 
     const [
       { data: profileData, error: profileError },
@@ -102,10 +149,19 @@ export default function ProgressPage() {
     ] = await Promise.all([
       supabase
         .from("profiles")
-        .select("name, bodyweight, goal, focus, experience_level")
+        .select("id, user_id, name, bodyweight, goal, focus, experience_level")
+        .eq("user_id", user.id)
         .maybeSingle(),
-      supabase.from("workouts").select("*").order("created_at", { ascending: false }),
-      supabase.from("workout_sets").select("*").order("created_at", { ascending: false }),
+      supabase
+        .from("workouts")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("workout_sets")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false }),
     ]);
 
     if (profileError) {
@@ -138,6 +194,7 @@ export default function ProgressPage() {
     setProfile((profileData as Profile) ?? null);
     setWorkouts((workoutsData as Workout[]) ?? []);
     setSets((setsData as WorkoutSet[]) ?? []);
+    setStatus("");
     setLoading(false);
   }
 
@@ -520,6 +577,13 @@ export default function ProgressPage() {
           Goal: {profile?.goal ? titleCase(profile.goal) : "General"} • Bodyweight:{" "}
           {profile?.bodyweight || "--"}
         </p>
+
+        <div style={accountBarStyle}>
+          <div style={accountInfoStyle}>
+            <span style={accountLabelStyle}>Signed in as</span>
+            <span style={accountValueStyle}>{authUser?.email || authUser?.id}</span>
+          </div>
+        </div>
       </section>
 
       <section style={cardStyle}>
@@ -694,6 +758,8 @@ export default function ProgressPage() {
           </div>
         </section>
       </section>
+
+      {status ? <p style={statusStyle}>{status}</p> : null}
     </main>
   );
 }
@@ -736,6 +802,32 @@ const heroSubStyle: CSSProperties = {
   color: "#d0d0d0",
   fontSize: "15px",
   margin: 0,
+};
+
+const accountBarStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "12px",
+  marginTop: "18px",
+  flexWrap: "wrap",
+};
+
+const accountInfoStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "4px",
+};
+
+const accountLabelStyle: CSSProperties = {
+  color: "#a9a9a9",
+  fontSize: "12px",
+};
+
+const accountValueStyle: CSSProperties = {
+  color: "#ffffff",
+  fontWeight: 700,
+  fontSize: "14px",
 };
 
 const cardStyle: CSSProperties = {
@@ -910,4 +1002,10 @@ const sessionDurationStyle: CSSProperties = {
 const mutedStyle: CSSProperties = {
   color: "#9f9f9f",
   margin: 0,
+};
+
+const statusStyle: CSSProperties = {
+  color: "#cccccc",
+  marginTop: "18px",
+  marginBottom: 0,
 };

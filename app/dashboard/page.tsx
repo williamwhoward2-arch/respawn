@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
@@ -74,8 +73,15 @@ export default function DashboardPage() {
     } = await supabase.auth.getUser();
 
     if (userError) {
+      const message = userError.message || "";
+      if (message.includes("Invalid Refresh Token")) {
+        await supabase.auth.signOut();
+        router.replace("/login");
+        return;
+      }
+
       console.error("Get user error:", userError);
-      setStatus(`Error: ${userError.message}`);
+      setStatus(`Error: ${message}`);
       setLoading(false);
       return;
     }
@@ -341,6 +347,44 @@ export default function DashboardPage() {
     return completedSets.filter((set) => last7Ids.has(set.workout_id)).length;
   }, [trainingWorkouts, completedSets, last7Start]);
 
+  const lifetimeVolume = useMemo(() => {
+    return completedSets.reduce(
+      (sum, set) => sum + toNumber(set.weight) * toNumber(set.reps),
+      0
+    );
+  }, [completedSets]);
+
+  const lifetimeSets = completedSets.length;
+
+  const uniqueExercises = useMemo(() => {
+    const unique = new Set(
+      completedSets
+        .map((set) => (set.exercise_name ?? "").trim())
+        .filter(Boolean)
+        .map((name) => name.toLowerCase())
+    );
+    return unique.size;
+  }, [completedSets]);
+
+  const strongestEstimatedLift = useMemo(() => {
+    if (completedSets.length === 0) return null;
+
+    const ranked = completedSets
+      .map((set) => {
+        const weight = toNumber(set.weight);
+        const reps = toNumber(set.reps);
+        return {
+          name: set.exercise_name ?? "Exercise",
+          e1rm: Math.round(estimate1RM(weight, reps)),
+          weight,
+          reps,
+        };
+      })
+      .sort((a, b) => b.e1rm - a.e1rm);
+
+    return ranked[0] ?? null;
+  }, [completedSets]);
+
   const momentum = useMemo(() => {
     const last7Workouts = trainingWorkouts.filter(
       (w) => startOfDay(w.created_at) >= last7Start
@@ -460,7 +504,7 @@ export default function DashboardPage() {
         };
       })
       .filter((item) => item.timesLogged >= 3)
-      .sort((a, b) => (b.timesLogged * 1000 + b.totalVolume) - (a.timesLogged * 1000 + a.totalVolume))
+      .sort((a, b) => b.timesLogged * 1000 + b.totalVolume - (a.timesLogged * 1000 + a.totalVolume))
       .slice(0, 4);
   }, [completedSets]);
 
@@ -617,18 +661,66 @@ export default function DashboardPage() {
 
       <section style={cardStyle}>
         <div style={sectionHeaderStyle}>
-          <h2 style={sectionTitle}>Quick Actions</h2>
+          <h2 style={sectionTitle}>Performance Snapshot</h2>
         </div>
 
-        <div style={stackedButtonWrapStyle}>
-          <Link href="/Workout" style={largePrimaryNavButtonStyle}>
-            Start Workout
-          </Link>
+        <div style={miniStatGridStyle}>
+          <div style={miniStatBoxStyle}>
+            <span style={miniStatLabelStyle}>Last 30 days</span>
+            <span style={miniStatValueStyle}>{workoutsLast30}</span>
+          </div>
 
-          <Link href="/Profile" style={largeSecondaryNavButtonStyle}>
-            Open Profile
-          </Link>
+          <div style={miniStatBoxStyle}>
+            <span style={miniStatLabelStyle}>Avg workout</span>
+            <span style={miniStatValueStyle}>
+              {avgWorkoutDuration ? `${avgWorkoutDuration} min` : "--"}
+            </span>
+          </div>
+
+          <div style={miniStatBoxStyle}>
+            <span style={miniStatLabelStyle}>Lifetime sets</span>
+            <span style={miniStatValueStyle}>{lifetimeSets}</span>
+          </div>
+
+          <div style={miniStatBoxStyle}>
+            <span style={miniStatLabelStyle}>Unique exercises</span>
+            <span style={miniStatValueStyle}>{uniqueExercises}</span>
+          </div>
         </div>
+
+        <div style={miniStatGridStyle}>
+          <div style={miniStatBoxStyle}>
+            <span style={miniStatLabelStyle}>Lifetime volume</span>
+            <span style={miniStatValueStyleSmall}>
+              {Math.round(lifetimeVolume).toLocaleString()}
+            </span>
+          </div>
+
+          <div style={miniStatBoxStyle}>
+            <span style={miniStatLabelStyle}>Strongest est. lift</span>
+            <span style={miniStatValueStyleSmall}>
+              {strongestEstimatedLift
+                ? `${strongestEstimatedLift.name} • ${strongestEstimatedLift.e1rm}`
+                : "No data yet"}
+            </span>
+          </div>
+
+          <div style={miniStatBoxStyle}>
+            <span style={miniStatLabelStyle}>Top body part</span>
+            <span style={miniStatValueStyleSmall}>
+              {bodyPartSummary[0]?.bodyPart ?? "No data yet"}
+            </span>
+          </div>
+
+          <div style={miniStatBoxStyle}>
+            <span style={miniStatLabelStyle}>Rep bias</span>
+            <span style={miniStatValueStyleSmall}>{repBias}</span>
+          </div>
+        </div>
+
+        <p style={cardFootnoteStyle}>
+          This dashboard now prioritizes progress data over navigation shortcuts.
+        </p>
       </section>
 
       <section style={twoColGridStyle}>
@@ -922,38 +1014,6 @@ const sectionTitle: CSSProperties = {
   margin: 0,
   fontSize: "18px",
   fontWeight: 800,
-};
-
-const stackedButtonWrapStyle: CSSProperties = {
-  display: "grid",
-  gap: "12px",
-};
-
-const largePrimaryNavButtonStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: "64px",
-  backgroundColor: "#ff1a1a",
-  borderRadius: "14px",
-  color: "white",
-  textDecoration: "none",
-  fontWeight: 800,
-  fontSize: "16px",
-};
-
-const largeSecondaryNavButtonStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: "64px",
-  backgroundColor: "#1c1c1c",
-  border: "1px solid #333",
-  borderRadius: "14px",
-  color: "white",
-  textDecoration: "none",
-  fontWeight: 800,
-  fontSize: "16px",
 };
 
 const twoColGridStyle: CSSProperties = {

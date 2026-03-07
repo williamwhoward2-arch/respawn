@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
@@ -46,6 +45,7 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [resetting, setResetting] = useState(false);
   const [savingAndLeaving, setSavingAndLeaving] = useState(false);
+  const [showOnboardingTip, setShowOnboardingTip] = useState(false);
 
   useEffect(() => {
     void initializeProfilePage();
@@ -55,14 +55,27 @@ export default function ProfilePage() {
     setLoading(true);
     setStatus("Checking account...");
 
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      setShowOnboardingTip(params.get("onboarding") === "true");
+    }
+
     const {
       data: { user },
       error: userError,
     } = await supabase.auth.getUser();
 
     if (userError) {
+      const message = userError.message || "";
+
+      if (message.includes("Invalid Refresh Token")) {
+        await supabase.auth.signOut();
+        router.replace("/login");
+        return;
+      }
+
       console.error("Get user error:", userError);
-      setStatus(`Error: ${userError.message}`);
+      setStatus(`Error: ${message}`);
       setLoading(false);
       return;
     }
@@ -153,7 +166,11 @@ export default function ProfilePage() {
 
     if (redirectToDashboard) {
       setSavingAndLeaving(true);
-      setStatus(profileId ? "Updating profile and opening dashboard..." : "Saving profile and opening dashboard...");
+      setStatus(
+        profileId
+          ? "Updating profile and opening dashboard..."
+          : "Saving profile and opening dashboard..."
+      );
     } else {
       setStatus(profileId ? "Updating your profile..." : "Saving your profile...");
     }
@@ -195,6 +212,7 @@ export default function ProfilePage() {
       setStatus("Profile updated successfully.");
 
       if (redirectToDashboard) {
+        setShowOnboardingTip(false);
         router.push("/dashboard");
       }
 
@@ -221,6 +239,7 @@ export default function ProfilePage() {
     setStatus("Profile saved successfully.");
 
     if (redirectToDashboard) {
+      setShowOnboardingTip(false);
       router.push("/dashboard");
     }
 
@@ -307,12 +326,6 @@ export default function ProfilePage() {
     router.replace("/login");
   }
 
-  function testSupabaseConnection() {
-    console.log("Supabase client:", supabase);
-    console.log("Current auth user:", authUser);
-    alert("Supabase client loaded. Check browser console.");
-  }
-
   if (loading) {
     return (
       <main style={pageStyle}>
@@ -356,7 +369,9 @@ export default function ProfilePage() {
         <div style={accountBarStyle}>
           <div style={accountInfoStyle}>
             <span style={accountLabelStyle}>Signed in as</span>
-            <span style={accountValueStyle}>{authUser?.email || authUser?.id || "Not signed in"}</span>
+            <span style={accountValueStyle}>
+              {authUser?.email || authUser?.id || "Not signed in"}
+            </span>
           </div>
 
           <button onClick={handleSignOut} style={secondaryButtonStyle}>
@@ -365,21 +380,33 @@ export default function ProfilePage() {
         </div>
       </section>
 
-      <section style={cardStyle}>
-        <div style={sectionHeaderStyle}>
-          <h2 style={sectionTitle}>Go To</h2>
-        </div>
+      {showOnboardingTip && (
+        <section style={tipCardStyle}>
+          <div style={tipHeaderRowStyle}>
+            <div>
+              <p style={tipEyebrowStyle}>FIRST-TIME SETUP</p>
+              <h2 style={tipTitleStyle}>Set up your profile first</h2>
+            </div>
 
-        <div style={stackedButtonWrapStyle}>
-          <Link href="/dashboard" style={largeSecondaryNavButtonStyle}>
-            Open Dashboard
-          </Link>
+            <button
+              onClick={() => setShowOnboardingTip(false)}
+              style={tipDismissButtonStyle}
+            >
+              Dismiss
+            </button>
+          </div>
 
-          <Link href="/Workout" style={largePrimaryNavButtonStyle}>
-            Start Workout
-          </Link>
-        </div>
-      </section>
+          <p style={tipBodyStyle}>
+            Your profile helps ReSpawn generate better workouts, set smarter guidance,
+            and make your dashboard and progress insights more personal to your goal,
+            experience, and equipment.
+          </p>
+
+          <p style={tipBodyStyle}>
+            Fill out your basics, then tap <strong>Save Profile &amp; Go to Dashboard</strong>.
+          </p>
+        </section>
+      )}
 
       <section style={cardStyle}>
         <div style={sectionHeaderStyle}>
@@ -460,7 +487,11 @@ export default function ProfilePage() {
 
           <label style={fieldStyle}>
             <span style={labelStyle}>Experience level</span>
-            <select value={experienceLevel} onChange={(e) => setExperienceLevel(e.target.value)} style={inputStyle}>
+            <select
+              value={experienceLevel}
+              onChange={(e) => setExperienceLevel(e.target.value)}
+              style={inputStyle}
+            >
               <option value="">Select</option>
               <option value="beginner">Beginner</option>
               <option value="intermediate">Intermediate</option>
@@ -470,7 +501,11 @@ export default function ProfilePage() {
 
           <label style={fieldStyle}>
             <span style={labelStyle}>Equipment access</span>
-            <select value={equipmentAccess} onChange={(e) => setEquipmentAccess(e.target.value)} style={inputStyle}>
+            <select
+              value={equipmentAccess}
+              onChange={(e) => setEquipmentAccess(e.target.value)}
+              style={inputStyle}
+            >
               <option value="">Select</option>
               <option value="full_gym">Full gym</option>
               <option value="dumbbells_only">Dumbbells only</option>
@@ -488,12 +523,16 @@ export default function ProfilePage() {
           <h2 style={sectionTitle}>Actions</h2>
         </div>
 
-        <div style={stackedButtonWrapStyle}>
+        <div style={actionGridStyle}>
           <button onClick={() => saveProfile()} style={primaryButtonStyle}>
             {profileId ? "Update Profile" : "Save Profile"}
           </button>
 
-          <button onClick={handleSaveAndGoDashboard} style={primaryButtonStyle} disabled={savingAndLeaving}>
+          <button
+            onClick={handleSaveAndGoDashboard}
+            style={primaryButtonStyle}
+            disabled={savingAndLeaving}
+          >
             {savingAndLeaving ? "Saving..." : "Save Profile & Go to Dashboard"}
           </button>
 
@@ -503,10 +542,6 @@ export default function ProfilePage() {
 
           <button onClick={() => loadUserProfile()} style={secondaryButtonStyle}>
             Reload My Profile
-          </button>
-
-          <button onClick={testSupabaseConnection} style={secondaryButtonStyle}>
-            Test Supabase
           </button>
         </div>
       </section>
@@ -553,7 +588,9 @@ export default function ProfilePage() {
             </div>
             <div style={summaryCardStyle}>
               <span style={summaryLabelStyle}>Equipment</span>
-              <span style={summaryValueStyle}>{formatEquipmentLabel(equipmentAccess) || "--"}</span>
+              <span style={summaryValueStyle}>
+                {formatEquipmentLabel(equipmentAccess) || "--"}
+              </span>
             </div>
             <div style={summaryCardStyle}>
               <span style={summaryLabelStyle}>Bodyweight</span>
@@ -602,7 +639,8 @@ const pageStyle: CSSProperties = {
 };
 
 const heroCardStyle: CSSProperties = {
-  background: "linear-gradient(135deg, rgba(255,26,26,0.18) 0%, rgba(20,20,20,1) 55%, rgba(10,10,10,1) 100%)",
+  background:
+    "linear-gradient(135deg, rgba(255,26,26,0.18) 0%, rgba(20,20,20,1) 55%, rgba(10,10,10,1) 100%)",
   border: "1px solid rgba(255,255,255,0.08)",
   borderRadius: "24px",
   padding: "24px",
@@ -732,36 +770,10 @@ const dangerTextStyle: CSSProperties = {
   marginBottom: "16px",
 };
 
-const stackedButtonWrapStyle: CSSProperties = {
+const actionGridStyle: CSSProperties = {
   display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
   gap: "12px",
-};
-
-const largePrimaryNavButtonStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: "64px",
-  backgroundColor: "#ff1a1a",
-  borderRadius: "14px",
-  color: "white",
-  textDecoration: "none",
-  fontWeight: 800,
-  fontSize: "16px",
-};
-
-const largeSecondaryNavButtonStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: "64px",
-  backgroundColor: "#1c1c1c",
-  border: "1px solid #333",
-  borderRadius: "14px",
-  color: "white",
-  textDecoration: "none",
-  fontWeight: 800,
-  fontSize: "16px",
 };
 
 const formGridStyle: CSSProperties = {
@@ -858,4 +870,54 @@ const summaryValueStyle: CSSProperties = {
   color: "#fff",
   fontSize: "22px",
   fontWeight: 900,
+};
+
+const tipCardStyle: CSSProperties = {
+  background: "linear-gradient(135deg, rgba(255,26,26,0.14), rgba(255,255,255,0.03))",
+  border: "1px solid rgba(255,107,107,0.28)",
+  borderRadius: "22px",
+  padding: "20px",
+  marginBottom: "16px",
+  boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
+};
+
+const tipHeaderRowStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
+  gap: "12px",
+  marginBottom: "10px",
+  flexWrap: "wrap",
+};
+
+const tipEyebrowStyle: CSSProperties = {
+  color: "#ff8b8b",
+  fontSize: "12px",
+  fontWeight: 800,
+  letterSpacing: "0.12em",
+  margin: "0 0 6px",
+};
+
+const tipTitleStyle: CSSProperties = {
+  color: "#fff",
+  fontSize: "22px",
+  fontWeight: 900,
+  margin: 0,
+};
+
+const tipBodyStyle: CSSProperties = {
+  color: "#d8d8d8",
+  fontSize: "15px",
+  lineHeight: 1.6,
+  margin: "0 0 10px",
+};
+
+const tipDismissButtonStyle: CSSProperties = {
+  background: "transparent",
+  border: "1px solid #444",
+  color: "#ddd",
+  padding: "10px 12px",
+  borderRadius: "10px",
+  cursor: "pointer",
+  fontWeight: 700,
 };

@@ -7,7 +7,6 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { exerciseLibrary } from "@/lib/workoutGeneratorData";
@@ -50,6 +49,23 @@ type GeneratedWorkoutPayload = {
 type AuthUser = {
   id: string;
   email?: string;
+};
+
+type ExerciseHistorySnapshot = {
+  exerciseName: string;
+  bodyPart: string;
+  lastWeight: string;
+  lastReps: string;
+  bestWeight: string;
+  bestReps: string;
+};
+
+type ExerciseHistoryMap = Record<string, ExerciseHistorySnapshot>;
+
+type AiSuggestion = {
+  weight: string;
+  reps: string;
+  reason: string;
 };
 
 function mapPrimaryMuscleToLibraryBodyPart(muscle: string): string {
@@ -136,7 +152,35 @@ function normalizeName(value: string) {
   return value.trim().toLowerCase();
 }
 
-function getMostLikelyWeight(exerciseName: string, exercises: Exercise[]) {
+function getWeightIncrement(weight: number, bodyPart?: string) {
+  if (bodyPart === "Arms" || bodyPart === "Shoulders") {
+    if (weight <= 20) return 2.5;
+    if (weight <= 50) return 5;
+    return 5;
+  }
+
+  if (weight <= 20) return 2.5;
+  if (weight <= 60) return 5;
+  if (weight <= 120) return 5;
+  if (weight <= 220) return 10;
+  return 10;
+}
+
+function roundToIncrement(value: number, increment: number) {
+  if (!increment || increment <= 0) return value;
+  return Math.round(value / increment) * increment;
+}
+
+function formatSmartNumber(value: number) {
+  if (Number.isInteger(value)) return String(value);
+  return value.toFixed(1).replace(/\.0$/, "");
+}
+
+function getMostLikelyWeight(
+  exerciseName: string,
+  exercises: Exercise[],
+  historyMap?: ExerciseHistoryMap
+) {
   for (const exercise of exercises) {
     if (normalizeName(exercise.name) !== normalizeName(exerciseName)) continue;
 
@@ -146,10 +190,19 @@ function getMostLikelyWeight(exerciseName: string, exercises: Exercise[]) {
     }
   }
 
+  const history = historyMap?.[normalizeName(exerciseName)];
+  if (history?.lastWeight) return history.lastWeight;
+  if (history?.bestWeight) return history.bestWeight;
+
   return "";
 }
 
-function getMostLikelyReps(exerciseName: string, exercises: Exercise[], fallback = "") {
+function getMostLikelyReps(
+  exerciseName: string,
+  exercises: Exercise[],
+  historyMap?: ExerciseHistoryMap,
+  fallback = ""
+) {
   for (const exercise of exercises) {
     if (normalizeName(exercise.name) !== normalizeName(exerciseName)) continue;
 
@@ -159,7 +212,100 @@ function getMostLikelyReps(exerciseName: string, exercises: Exercise[], fallback
     }
   }
 
+  const history = historyMap?.[normalizeName(exerciseName)];
+  if (history?.lastReps) return history.lastReps;
+  if (history?.bestReps) return history.bestReps;
+
   return fallback;
+}
+
+function getExerciseBaseDefaults(
+  exercise: Exercise,
+  allExercises: Exercise[],
+  historyMap: ExerciseHistoryMap
+) {
+  return {
+    weight: getMostLikelyWeight(exercise.name, allExercises, historyMap),
+    reps: getMostLikelyReps(exercise.name, allExercises, historyMap, "8"),
+  };
+}
+
+function buildProgressionSuggestion(
+  exercise: Exercise,
+  setIndex: number,
+  allExercises: Exercise[],
+  historyMap: ExerciseHistoryMap
+): AiSuggestion {
+  const currentSet = exercise.sets[setIndex];
+  const currentWeight = toNumber(currentSet?.weight);
+  const currentReps = toNumber(currentSet?.reps);
+
+  const lastCompletedSet =
+    [...exercise.sets]
+      .slice(0, setIndex + 1)
+      .reverse()
+      .find(
+        (set) =>
+          set.completed &&
+          String(set.weight).trim() !== "" &&
+          String(set.reps).trim() !== ""
+      ) || null;
+
+  const history = historyMap[normalizeName(exercise.name)];
+  const baseDefaults = getExerciseBaseDefaults(exercise, allExercises, historyMap);
+
+  const referenceWeight = lastCompletedSet
+    ? toNumber(lastCompletedSet.weight)
+    : currentWeight || toNumber(baseDefaults.weight) || toNumber(history?.lastWeight);
+
+  const referenceReps = lastCompletedSet
+    ? toNumber(lastCompletedSet.reps)
+    : currentReps || toNumber(baseDefaults.reps) || toNumber(history?.lastReps) || 8;
+
+  if (!referenceWeight && !referenceReps) {
+    return {
+      weight: "",
+      reps: "8",
+      reason: "Start with a moderate working set and adjust after the first completion.",
+    };
+  }
+
+  const increment = getWeightIncrement(referenceWeight || 20, exercise.bodyPart);
+  let suggestedWeight = referenceWeight;
+  let suggestedReps = referenceReps || 8;
+  let reason = "Matched your most recent working set.";
+
+  if (referenceReps >= 12) {
+    suggestedWeight = roundToIncrement(referenceWeight + increment, increment);
+    suggestedReps = Math.max(8, referenceReps - 2);
+    reason = `Strong prior set. AI suggests a small load bump of +${formatSmartNumber(
+      increment
+    )}.`;
+  } else if (referenceReps >= 10) {
+    suggestedWeight = roundToIncrement(referenceWeight + increment, increment);
+    suggestedReps = referenceReps;
+    reason = `You hit the top of the range. AI suggests progressing load by ${formatSmartNumber(
+      increment
+    )}.`;
+  } else if (referenceReps >= 8) {
+    suggestedWeight = referenceWeight;
+    suggestedReps = referenceReps;
+    reason = "Solid working range. Hold weight steady and beat it cleanly.";
+  } else if (referenceReps >= 6) {
+    suggestedWeight = referenceWeight;
+    suggestedReps = Math.min(8, referenceReps + 1);
+    reason = "Stay here and try to recover a rep before adding weight.";
+  } else {
+    suggestedWeight = Math.max(0, roundToIncrement(referenceWeight - increment, increment));
+    suggestedReps = 8;
+    reason = "Reps dropped off. AI suggests a slight pullback to keep quality high.";
+  }
+
+  return {
+    weight: suggestedWeight ? formatSmartNumber(suggestedWeight) : "",
+    reps: suggestedReps ? String(suggestedReps) : "8",
+    reason,
+  };
 }
 
 export default function WorkoutPage() {
@@ -184,12 +330,61 @@ export default function WorkoutPage() {
   const [workoutTitle, setWorkoutTitle] = useState("Build Your Session");
 
   const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [historyMap, setHistoryMap] = useState<ExerciseHistoryMap>({});
 
   const exerciseCardRefs = useRef<Record<string, HTMLElement | null>>({});
 
   useEffect(() => {
     void initializeWorkoutPage();
   }, []);
+
+  async function loadExerciseHistory(userId: string) {
+    const { data, error } = await supabase
+      .from("workout_sets")
+      .select("exercise_name, body_part, weight, reps, created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(500);
+
+    if (error) {
+      console.error("Failed to load exercise history:", error);
+      return {};
+    }
+
+    const rows = data || [];
+    const nextHistory: ExerciseHistoryMap = {};
+
+    for (const row of rows) {
+      const name = String(row.exercise_name || "").trim();
+      if (!name) continue;
+
+      const key = normalizeName(name);
+      const weight = String(row.weight ?? "").trim();
+      const reps = String(row.reps ?? "").trim();
+
+      if (!nextHistory[key]) {
+        nextHistory[key] = {
+          exerciseName: name,
+          bodyPart: String(row.body_part || "Other"),
+          lastWeight: weight,
+          lastReps: reps,
+          bestWeight: weight,
+          bestReps: reps,
+        };
+        continue;
+      }
+
+      const currentBestWeight = toNumber(nextHistory[key].bestWeight);
+      const currentRowWeight = toNumber(weight);
+
+      if (currentRowWeight > currentBestWeight) {
+        nextHistory[key].bestWeight = weight;
+        nextHistory[key].bestReps = reps;
+      }
+    }
+
+    return nextHistory;
+  }
 
   async function initializeWorkoutPage() {
     setAuthLoading(true);
@@ -237,26 +432,49 @@ export default function WorkoutPage() {
     setFavoriteExercises(parsedFavorites);
     setCustomLibrary(parsedCustomLibrary);
 
+    const loadedHistoryMap = await loadExerciseHistory(user.id);
+    setHistoryMap(loadedHistoryMap);
+
     const rawGeneratedWorkout = localStorage.getItem("respawn_generated_workout");
 
     if (rawGeneratedWorkout) {
       try {
         const parsed: GeneratedWorkoutPayload = JSON.parse(rawGeneratedWorkout);
 
-        const mappedExercises: Exercise[] = parsed.exercises.map((exercise) => ({
-          id: makeId(),
-          name: exercise.exercise_name,
-          bodyPart: formatBodyPart(exercise.body_part),
-          sets:
-            exercise.sets.length > 0
-              ? exercise.sets.map((set) => ({
-                  weight: set.weight ?? "",
-                  reps: set.reps ?? "",
-                  completed: false,
-                }))
-              : [{ weight: "", reps: "", completed: false }],
-          favorite: parsedFavorites.includes(exercise.exercise_name),
-        }));
+        const mappedExercises: Exercise[] = parsed.exercises.map((exercise) => {
+          const history = loadedHistoryMap[normalizeName(exercise.exercise_name)];
+
+          return {
+            id: makeId(),
+            name: exercise.exercise_name,
+            bodyPart: formatBodyPart(exercise.body_part),
+            sets:
+              exercise.sets.length > 0
+                ? exercise.sets.map((set, setIndex) => ({
+                    weight:
+                      String(set.weight ?? "").trim() !== ""
+                        ? String(set.weight)
+                        : setIndex === 0
+                        ? history?.lastWeight || ""
+                        : "",
+                    reps:
+                      String(set.reps ?? "").trim() !== ""
+                        ? String(set.reps)
+                        : setIndex === 0
+                        ? history?.lastReps || "8"
+                        : "8",
+                    completed: false,
+                  }))
+                : [
+                    {
+                      weight: history?.lastWeight || "",
+                      reps: history?.lastReps || "8",
+                      completed: false,
+                    },
+                  ],
+            favorite: parsedFavorites.includes(exercise.exercise_name),
+          };
+        });
 
         if (mappedExercises.length > 0) {
           setExercises(mappedExercises);
@@ -382,6 +600,50 @@ export default function WorkoutPage() {
     });
   }
 
+  function applySuggestionToSet(exerciseIndex: number, setIndex: number) {
+    setExercises((prev) => {
+      const updated = [...prev];
+      const exercise = { ...updated[exerciseIndex] };
+      const sets = [...exercise.sets];
+
+      const suggestion = buildProgressionSuggestion(exercise, setIndex, prev, historyMap);
+
+      sets[setIndex] = {
+        ...sets[setIndex],
+        weight: suggestion.weight,
+        reps: suggestion.reps,
+        completed: false,
+      };
+
+      exercise.sets = sets;
+      updated[exerciseIndex] = exercise;
+      return updated;
+    });
+
+    setStatus("AI suggestion applied.");
+  }
+
+  function resetSetValues(exerciseIndex: number, setIndex: number) {
+    setExercises((prev) => {
+      const updated = [...prev];
+      const exercise = { ...updated[exerciseIndex] };
+      const sets = [...exercise.sets];
+
+      sets[setIndex] = {
+        ...sets[setIndex],
+        weight: "",
+        reps: "",
+        completed: false,
+      };
+
+      exercise.sets = sets;
+      updated[exerciseIndex] = exercise;
+      return updated;
+    });
+
+    setStatus("Set values cleared.");
+  }
+
   function toggleSetCompleted(exerciseIndex: number, setIndex: number) {
     let blocked = false;
 
@@ -399,58 +661,67 @@ export default function WorkoutPage() {
         return prev;
       }
 
+      const willComplete = !currentSet.completed;
+
       sets[setIndex] = {
         ...currentSet,
-        completed: !currentSet.completed,
+        completed: willComplete,
       };
+
+      if (willComplete && sets[setIndex + 1]) {
+        const nextSet = sets[setIndex + 1];
+        const nextBlank =
+          String(nextSet.weight).trim() === "" && String(nextSet.reps).trim() === "";
+
+        if (nextBlank) {
+          const tempExercise = { ...exercise, sets };
+          const suggestion = buildProgressionSuggestion(
+            tempExercise,
+            setIndex,
+            updated,
+            historyMap
+          );
+
+          sets[setIndex + 1] = {
+            ...nextSet,
+            weight: suggestion.weight,
+            reps: suggestion.reps,
+            completed: false,
+          };
+        }
+      }
 
       exercise.sets = sets;
       updated[exerciseIndex] = exercise;
       return updated;
     });
 
-    if (blocked) setStatus("Enter both weight and reps before marking a set complete.");
+    if (blocked) {
+      setStatus("Enter both weight and reps before marking a set complete.");
+      return;
+    }
+
+    setStatus("Set updated.");
   }
 
   function addSet(exerciseIndex: number) {
     setExercises((prev) => {
       const updated = [...prev];
       const exercise = { ...updated[exerciseIndex] };
+      const nextSetIndex = exercise.sets.length;
 
-      let copiedWeight = "";
-      let copiedReps = "";
-
-      for (let i = exercise.sets.length - 1; i >= 0; i -= 1) {
-        const set = exercise.sets[i];
-        const hasWeight = String(set.weight).trim() !== "";
-        const hasReps = String(set.reps).trim() !== "";
-
-        if (set.completed && (hasWeight || hasReps)) {
-          copiedWeight = set.weight ?? "";
-          copiedReps = set.reps ?? "";
-          break;
-        }
-      }
-
-      if (!copiedWeight && !copiedReps) {
-        for (let i = exercise.sets.length - 1; i >= 0; i -= 1) {
-          const set = exercise.sets[i];
-          const hasWeight = String(set.weight).trim() !== "";
-          const hasReps = String(set.reps).trim() !== "";
-
-          if (hasWeight || hasReps) {
-            copiedWeight = set.weight ?? "";
-            copiedReps = set.reps ?? "";
-            break;
-          }
-        }
-      }
+      const suggestion = buildProgressionSuggestion(
+        exercise,
+        nextSetIndex - 1,
+        updated,
+        historyMap
+      );
 
       exercise.sets = [
         ...exercise.sets,
         {
-          weight: copiedWeight,
-          reps: copiedReps,
+          weight: suggestion.weight,
+          reps: suggestion.reps,
           completed: false,
         },
       ];
@@ -459,7 +730,7 @@ export default function WorkoutPage() {
       return updated;
     });
 
-    setStatus("Set added and copied from your previous set.");
+    setStatus("Set added with AI prefill.");
   }
 
   function removeSet(exerciseIndex: number, setIndex: number) {
@@ -484,18 +755,19 @@ export default function WorkoutPage() {
       const updated = [...prev];
       const exercise = updated[exerciseIndex];
 
-      const defaultWeight = getMostLikelyWeight(exercise.name, prev);
-      const defaultReps = getMostLikelyReps(exercise.name, prev);
-
       updated[exerciseIndex] = {
         ...exercise,
-        sets: [{ weight: defaultWeight, reps: defaultReps, completed: false }],
+        sets: exercise.sets.map(() => ({
+          weight: "",
+          reps: "",
+          completed: false,
+        })),
       };
 
       return updated;
     });
 
-    setStatus("Exercise sets reset.");
+    setStatus("All set values cleared.");
   }
 
   function removeExercise(exerciseIndex: number) {
@@ -550,8 +822,8 @@ export default function WorkoutPage() {
       return;
     }
 
-    const defaultWeight = getMostLikelyWeight(cleanName, exercises);
-    const defaultReps = getMostLikelyReps(cleanName, exercises);
+    const defaultWeight = getMostLikelyWeight(cleanName, exercises, historyMap);
+    const defaultReps = getMostLikelyReps(cleanName, exercises, historyMap, "8");
 
     const newExercise: Exercise = {
       id: makeId(),
@@ -767,22 +1039,6 @@ export default function WorkoutPage() {
         </section>
 
         <section style={cardStyle}>
-          <div style={sectionHeaderStyle}>
-            <h2 style={sectionTitle}>Go To</h2>
-          </div>
-
-          <div style={stackedButtonWrapStyle}>
-            <Link href="/dashboard" style={largePrimaryNavButtonStyle}>
-              Back to Dashboard
-            </Link>
-
-            <Link href="/Profile" style={largeSecondaryNavButtonStyle}>
-              Open Profile
-            </Link>
-          </div>
-        </section>
-
-        <section style={cardStyle}>
           {exercises.map((exercise) => {
             const completedExerciseSets = exercise.sets.filter(
               (set) =>
@@ -849,22 +1105,6 @@ export default function WorkoutPage() {
             <span style={heroStatLabel}>Completed Sets</span>
             <span style={heroStatValue}>{totalSets}</span>
           </div>
-        </div>
-      </section>
-
-      <section style={cardStyle}>
-        <div style={sectionHeaderStyle}>
-          <h2 style={sectionTitle}>Go To</h2>
-        </div>
-
-        <div style={stackedButtonWrapStyle}>
-          <Link href="/dashboard" style={largeSecondaryNavButtonStyle}>
-            Back to Dashboard
-          </Link>
-
-          <Link href="/Profile" style={largeSecondaryNavButtonStyle}>
-            Open Profile
-          </Link>
         </div>
       </section>
 
@@ -1020,45 +1260,77 @@ export default function WorkoutPage() {
             <div style={{ marginTop: 18 }}>
               <h3 style={setsHeaderStyle}>Sets</h3>
 
-              {exercise.sets.map((set, setIndex) => (
-                <div key={setIndex} style={editableSetRowStyle}>
-                  <span style={setNumberStyle}>Set {setIndex + 1}</span>
+              {exercise.sets.map((set, setIndex) => {
+                const suggestion = buildProgressionSuggestion(
+                  exercise,
+                  setIndex,
+                  exercises,
+                  historyMap
+                );
 
-                  <input
-                    placeholder="Weight"
-                    value={set.weight}
-                    onChange={(e) =>
-                      updateSetField(index, setIndex, "weight", e.target.value)
-                    }
-                    style={smallInputStyle}
-                    inputMode="decimal"
-                  />
+                return (
+                  <div key={setIndex} style={setBlockStyle}>
+                    <div style={editableSetRowStyle}>
+                      <span style={setNumberStyle}>Set {setIndex + 1}</span>
 
-                  <input
-                    placeholder="Reps"
-                    value={set.reps}
-                    onChange={(e) =>
-                      updateSetField(index, setIndex, "reps", e.target.value)
-                    }
-                    style={smallInputStyle}
-                    inputMode="numeric"
-                  />
+                      <input
+                        placeholder="Weight"
+                        value={set.weight}
+                        onChange={(e) =>
+                          updateSetField(index, setIndex, "weight", e.target.value)
+                        }
+                        style={smallInputStyle}
+                        inputMode="decimal"
+                      />
 
-                  <button
-                    onClick={() => toggleSetCompleted(index, setIndex)}
-                    style={set.completed ? completeButtonActiveStyle : completeButtonStyle}
-                  >
-                    {set.completed ? "Completed" : "Complete Set"}
-                  </button>
+                      <input
+                        placeholder="Reps"
+                        value={set.reps}
+                        onChange={(e) =>
+                          updateSetField(index, setIndex, "reps", e.target.value)
+                        }
+                        style={smallInputStyle}
+                        inputMode="numeric"
+                      />
 
-                  <button
-                    onClick={() => removeSet(index, setIndex)}
-                    style={dangerButtonStyle}
-                  >
-                    Remove Set
-                  </button>
-                </div>
-              ))}
+                      <button
+                        onClick={() => toggleSetCompleted(index, setIndex)}
+                        style={set.completed ? completeButtonActiveStyle : completeButtonStyle}
+                      >
+                        {set.completed ? "Completed" : "Complete Set"}
+                      </button>
+
+                      <button
+                        onClick={() => applySuggestionToSet(index, setIndex)}
+                        style={secondaryButtonStyle}
+                      >
+                        Apply AI
+                      </button>
+
+                      <button
+                        onClick={() => resetSetValues(index, setIndex)}
+                        style={secondaryButtonStyle}
+                      >
+                        Reset Values
+                      </button>
+
+                      <button
+                        onClick={() => removeSet(index, setIndex)}
+                        style={dangerButtonStyle}
+                      >
+                        Remove Set
+                      </button>
+                    </div>
+
+                    <div style={aiHintCardStyle}>
+                      <span style={aiHintTitleStyle}>
+                        AI Suggestion: {suggestion.weight || "-"} lbs × {suggestion.reps}
+                      </span>
+                      <span style={aiHintTextStyle}>{suggestion.reason}</span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
             <div style={{ marginTop: 14 }}>
@@ -1228,38 +1500,6 @@ const sectionTitle: CSSProperties = {
   fontWeight: 800,
 };
 
-const stackedButtonWrapStyle: CSSProperties = {
-  display: "grid",
-  gap: "12px",
-};
-
-const largePrimaryNavButtonStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: "64px",
-  backgroundColor: "#ff1a1a",
-  borderRadius: "14px",
-  color: "white",
-  textDecoration: "none",
-  fontWeight: 800,
-  fontSize: "16px",
-};
-
-const largeSecondaryNavButtonStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: "64px",
-  backgroundColor: "#1c1c1c",
-  border: "1px solid #333",
-  borderRadius: "14px",
-  color: "white",
-  textDecoration: "none",
-  fontWeight: 800,
-  fontSize: "16px",
-};
-
 const timerDisplayStyle: CSSProperties = {
   fontSize: "36px",
   fontWeight: 900,
@@ -1384,15 +1624,17 @@ const setsHeaderStyle: CSSProperties = {
   color: "#ffffff",
 };
 
+const setBlockStyle: CSSProperties = {
+  borderBottom: "1px solid #222",
+  padding: "10px 0 14px",
+};
+
 const editableSetRowStyle: CSSProperties = {
-  marginTop: "10px",
   color: "#ddd",
   display: "flex",
   alignItems: "center",
   gap: "10px",
   flexWrap: "wrap",
-  padding: "10px 0",
-  borderBottom: "1px solid #222",
 };
 
 const setRowStyle: CSSProperties = {
@@ -1480,4 +1722,27 @@ const listLineStyle: CSSProperties = {
   background: "#ff4d4d",
   borderRadius: "999px",
   flexShrink: 0,
+};
+
+const aiHintCardStyle: CSSProperties = {
+  marginTop: "10px",
+  background: "rgba(255,255,255,0.03)",
+  border: "1px solid rgba(255,255,255,0.06)",
+  borderRadius: "12px",
+  padding: "10px 12px",
+  display: "flex",
+  flexDirection: "column",
+  gap: "4px",
+};
+
+const aiHintTitleStyle: CSSProperties = {
+  color: "#ffffff",
+  fontSize: "13px",
+  fontWeight: 700,
+};
+
+const aiHintTextStyle: CSSProperties = {
+  color: "#9e9e9e",
+  fontSize: "12px",
+  lineHeight: 1.4,
 };

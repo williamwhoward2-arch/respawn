@@ -12,20 +12,64 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const params = new URLSearchParams(window.location.search);
-
-    if (params.get("created") === "true") {
-      setStatus("Account created successfully. Please sign in.");
-    }
+    void initializeLoginPage();
   }, []);
+
+  async function initializeLoginPage() {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+
+      if (params.get("created") === "true") {
+        setStatus("Account created successfully. Please sign in.");
+      }
+    }
+
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser();
+
+    if (error) {
+      const message = error.message || "";
+
+      if (message.includes("Invalid Refresh Token")) {
+        await supabase.auth.signOut();
+        setCheckingSession(false);
+        return;
+      }
+
+      setStatus(message);
+      setCheckingSession(false);
+      return;
+    }
+
+    if (!user) {
+      setCheckingSession(false);
+      return;
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (profileError) {
+      setStatus(profileError.message);
+      setCheckingSession(false);
+      return;
+    }
+
+    router.replace(profile ? "/dashboard" : "/Profile?onboarding=true");
+  }
 
   async function handleLogin(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
+    setStatus("");
 
     const { data, error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
@@ -59,6 +103,20 @@ export default function LoginPage() {
     }
 
     router.push(profile ? "/dashboard" : "/Profile?onboarding=true");
+  }
+
+  if (checkingSession) {
+    return (
+      <main style={pageStyle}>
+        <section style={cardStyle}>
+          <p style={eyebrowStyle}>RESPAWN</p>
+          <h1 style={titleStyle}>Checking session...</h1>
+          <p style={subStyle}>
+            Making sure you go to the right place.
+          </p>
+        </section>
+      </main>
+    );
   }
 
   return (
