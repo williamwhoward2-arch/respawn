@@ -6,24 +6,11 @@ import {
   type EquipmentAccess,
   type Exercise,
   type ExerciseCategory,
-  type MovementPattern,
-  type Muscle,
-  type WorkoutTag,
+  type MuscleEmphasis,
+  type WorkoutStyle,
+  type VolumeTier,
+  type GeneratedWorkoutStyle,
 } from "./workoutGeneratorData";
-
-type OptionalEnhancedExerciseFields = {
-  fatigueCost?: number;
-  complexity?: number;
-  jointStress?: "low" | "moderate" | "high";
-  jointStressAreas?: string[];
-  progressionType?: string;
-  biomechanicalPattern?: string;
-  emphasis?: string[];
-  isPrimaryCompound?: boolean;
-  isStable?: boolean;
-};
-
-type EnhancedExercise = Exercise & OptionalEnhancedExerciseFields;
 
 export type GeneratedSet = {
   set_number: number;
@@ -41,6 +28,9 @@ export type GeneratedExercise = {
   reason?: string;
   restSeconds?: number;
   targetWeight?: number | null;
+  repRange?: string;
+  category?: ExerciseCategory;
+  notes?: string | null;
 };
 
 export type GeneratedWorkout = {
@@ -50,6 +40,9 @@ export type GeneratedWorkout = {
   coachNote?: string;
   intensityLabel?: "easy" | "moderate" | "hard";
   progressionAdvice?: string[];
+  totalWorkingSets?: number;
+  workoutStyle?: GeneratedWorkoutStyle;
+  emphasis?: MuscleEmphasis | "";
   exercises: GeneratedExercise[];
 };
 
@@ -63,84 +56,57 @@ type GenerateWorkoutInput = {
   fatiguedAreas?: string[];
   preferredExercises?: string[];
   excludedExercises?: string[];
+  style?: WorkoutStyle;
+  volumeTier?: VolumeTier;
+  emphasis?: MuscleEmphasis | "";
+  recentExerciseIds?: string[];
 };
 
-type WorkoutRules = {
-  targetMuscles: Muscle[];
-  preferredTags: WorkoutTag[];
-  template: MovementPattern[];
-  allowedPatterns: MovementPattern[];
-  maxPatternRepeats: Partial<Record<MovementPattern, number>>;
-  maxPrimaryRepeats: number;
-  fillPriorityPatterns?: MovementPattern[];
+type TemplateSlot =
+  | "primary_press"
+  | "secondary_press"
+  | "upper_bias_press"
+  | "stable_press"
+  | "stretch_chest_iso"
+  | "squeeze_chest_iso"
+  | "back_row_primary"
+  | "back_row_secondary"
+  | "back_vertical_pull"
+  | "lat_isolation"
+  | "legs_primary_squat"
+  | "legs_primary_hinge"
+  | "legs_secondary_quad"
+  | "legs_secondary_ham"
+  | "legs_quad_iso"
+  | "legs_ham_iso"
+  | "calves"
+  | "shoulder_press"
+  | "side_delt"
+  | "rear_delt"
+  | "biceps_primary"
+  | "biceps_secondary"
+  | "triceps_primary"
+  | "triceps_secondary"
+  | "core"
+  | "finisher";
+
+type SlotDefinition = {
+  slot: TemplateSlot;
+  sets: number;
+  optional?: boolean;
 };
 
-const repSchemes: Record<
-  Goal,
-  Record<ExerciseCategory, { sets: number; reps: string; restSeconds: number }>
-> = {
-  strength: {
-    main: { sets: 5, reps: "3-5", restSeconds: 150 },
-    accessory: { sets: 3, reps: "5-8", restSeconds: 105 },
-    isolation: { sets: 2, reps: "8-12", restSeconds: 75 },
-  },
-  hypertrophy: {
-    main: { sets: 4, reps: "6-8", restSeconds: 105 },
-    accessory: { sets: 3, reps: "8-12", restSeconds: 75 },
-    isolation: { sets: 3, reps: "10-15", restSeconds: 60 },
-  },
-  fat_loss: {
-    main: { sets: 3, reps: "8-10", restSeconds: 75 },
-    accessory: { sets: 3, reps: "10-12", restSeconds: 50 },
-    isolation: { sets: 2, reps: "12-15", restSeconds: 40 },
-  },
-  general: {
-    main: { sets: 3, reps: "6-10", restSeconds: 90 },
-    accessory: { sets: 3, reps: "8-12", restSeconds: 60 },
-    isolation: { sets: 2, reps: "10-15", restSeconds: 45 },
-  },
+const STYLE_LABELS: Record<WorkoutStyle, GeneratedWorkoutStyle> = {
+  balanced: "Balanced Hypertrophy",
+  bodybuilding: "Bodybuilding Builder",
+  high_volume: "High Volume Mass",
+  old_school_mass: "Old School Mass",
+  intensity: "Intensity Focus",
+  pump: "Pump Session",
+  strength_size: "Strength + Size",
 };
 
-const experienceRank: Record<ExperienceLevel, number> = {
-  beginner: 1,
-  intermediate: 2,
-  advanced: 3,
-};
-
-const categoryPriority: Record<ExerciseCategory, number> = {
-  main: 1,
-  accessory: 2,
-  isolation: 3,
-};
-
-const movementPatternPriority: Record<MovementPattern, number> = {
-  squat: 1,
-  hinge: 2,
-  horizontal_press: 3,
-  vertical_press: 4,
-  vertical_pull: 5,
-  horizontal_pull: 6,
-  lunge: 7,
-  bodyweight_push: 8,
-  bodyweight_pull: 9,
-  fly: 10,
-  raise: 11,
-  curl: 12,
-  tricep_extension: 13,
-  calves: 14,
-  core: 15,
-};
-
-function shuffleArray<T>(array: T[]): T[] {
-  const copy = [...array];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-}
-
-function toTitleCase(value: string): string {
+function toTitleCase(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
@@ -148,24 +114,22 @@ function normalizeList(values?: string[]): string[] {
   return (values ?? []).map((value) => value.trim().toLowerCase()).filter(Boolean);
 }
 
-function includesNormalized(values: string[] | undefined, target: string): boolean {
-  return normalizeList(values).includes(target.trim().toLowerCase());
+function shuffleArray<T>(array: T[]): T[] {
+  const copy = [...array];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
 }
 
-function getExerciseCount(duration: number, level: ExperienceLevel): number {
-  if (duration <= 30) return level === "advanced" ? 4 : 3;
-  if (duration <= 45) return level === "advanced" ? 5 : 4;
-  if (duration <= 60) return level === "advanced" ? 6 : 5;
-  return level === "advanced" ? 7 : 6;
+function sampleOne<T>(items: T[]): T | null {
+  if (!items.length) return null;
+  return items[Math.floor(Math.random() * items.length)];
 }
 
-function getSetAdjustment(level: ExperienceLevel, goal: Goal): number {
-  if (goal === "strength" && level === "advanced") return 1;
-  return 0;
-}
-
-function buildSets(baseSets: number, reps: string): GeneratedSet[] {
-  return Array.from({ length: baseSets }, (_, index) => ({
+function buildSets(setCount: number, reps: string): GeneratedSet[] {
+  return Array.from({ length: setCount }, (_, index) => ({
     set_number: index + 1,
     weight: "",
     reps,
@@ -173,233 +137,24 @@ function buildSets(baseSets: number, reps: string): GeneratedSet[] {
   }));
 }
 
-function getWorkoutRules(bodyPart: BodyPart): WorkoutRules {
-  switch (bodyPart) {
-    case "chest":
-      return {
-        targetMuscles: ["chest", "front_delts", "triceps"],
-        preferredTags: ["push", "upper", "full_body"],
-        template: ["horizontal_press", "horizontal_press", "fly", "bodyweight_push"],
-        allowedPatterns: [
-          "horizontal_press",
-          "vertical_press",
-          "fly",
-          "bodyweight_push",
-          "tricep_extension",
-          "raise",
-        ],
-        maxPatternRepeats: {
-          horizontal_press: 2,
-          fly: 1,
-          bodyweight_push: 1,
-          tricep_extension: 1,
-          raise: 1,
-        },
-        maxPrimaryRepeats: 3,
-        fillPriorityPatterns: ["fly", "tricep_extension", "raise"],
-      };
-
-    case "back":
-      return {
-        targetMuscles: ["back", "lats", "upper_back", "rear_delts", "biceps"],
-        preferredTags: ["pull", "upper", "full_body"],
-        template: ["vertical_pull", "horizontal_pull", "horizontal_pull", "raise"],
-        allowedPatterns: [
-          "vertical_pull",
-          "horizontal_pull",
-          "bodyweight_pull",
-          "raise",
-          "hinge",
-          "curl",
-          "core",
-        ],
-        maxPatternRepeats: {
-          vertical_pull: 2,
-          horizontal_pull: 2,
-          raise: 1,
-          curl: 1,
-          hinge: 1,
-        },
-        maxPrimaryRepeats: 2,
-        fillPriorityPatterns: ["raise", "curl", "vertical_pull"],
-      };
-
-    case "legs":
-      return {
-        targetMuscles: ["quads", "glutes", "hamstrings", "calves"],
-        preferredTags: ["lower", "full_body"],
-        template: ["squat", "hinge", "lunge", "calves"],
-        allowedPatterns: ["squat", "hinge", "lunge", "calves", "core"],
-        maxPatternRepeats: {
-          squat: 2,
-          hinge: 2,
-          lunge: 2,
-          calves: 1,
-          core: 1,
-        },
-        maxPrimaryRepeats: 2,
-        fillPriorityPatterns: ["lunge", "calves", "core"],
-      };
-
-    case "shoulders":
-      return {
-        targetMuscles: ["shoulders", "front_delts", "side_delts", "rear_delts"],
-        preferredTags: ["push", "upper"],
-        template: ["vertical_press", "raise", "raise"],
-        allowedPatterns: [
-          "vertical_press",
-          "raise",
-          "horizontal_press",
-          "bodyweight_push",
-        ],
-        maxPatternRepeats: {
-          vertical_press: 2,
-          raise: 3,
-          horizontal_press: 1,
-          bodyweight_push: 1,
-        },
-        maxPrimaryRepeats: 2,
-        fillPriorityPatterns: ["raise", "vertical_press"],
-      };
-
-    case "arms":
-      return {
-        targetMuscles: ["biceps", "triceps", "forearms"],
-        preferredTags: ["push", "pull", "upper"],
-        template: ["curl", "tricep_extension", "curl"],
-        allowedPatterns: ["curl", "tricep_extension", "horizontal_press"],
-        maxPatternRepeats: {
-          curl: 3,
-          tricep_extension: 2,
-          horizontal_press: 1,
-        },
-        maxPrimaryRepeats: 2,
-        fillPriorityPatterns: ["tricep_extension", "curl"],
-      };
-
-    case "push":
-      return {
-        targetMuscles: ["chest", "shoulders", "front_delts", "side_delts", "triceps"],
-        preferredTags: ["push", "upper"],
-        template: ["horizontal_press", "vertical_press", "raise", "tricep_extension"],
-        allowedPatterns: [
-          "horizontal_press",
-          "vertical_press",
-          "fly",
-          "raise",
-          "tricep_extension",
-          "bodyweight_push",
-        ],
-        maxPatternRepeats: {
-          horizontal_press: 2,
-          vertical_press: 1,
-          fly: 1,
-          raise: 2,
-          tricep_extension: 1,
-          bodyweight_push: 1,
-        },
-        maxPrimaryRepeats: 2,
-        fillPriorityPatterns: ["fly", "tricep_extension", "raise"],
-      };
-
-    case "pull":
-      return {
-        targetMuscles: ["back", "lats", "upper_back", "rear_delts", "biceps"],
-        preferredTags: ["pull", "upper"],
-        template: ["vertical_pull", "horizontal_pull", "raise", "curl"],
-        allowedPatterns: [
-          "vertical_pull",
-          "horizontal_pull",
-          "bodyweight_pull",
-          "raise",
-          "curl",
-          "hinge",
-        ],
-        maxPatternRepeats: {
-          vertical_pull: 2,
-          horizontal_pull: 2,
-          raise: 1,
-          curl: 1,
-          hinge: 1,
-        },
-        maxPrimaryRepeats: 2,
-        fillPriorityPatterns: ["curl", "raise", "vertical_pull"],
-      };
-
-    case "full_body":
-      return {
-        targetMuscles: [
-          "quads",
-          "glutes",
-          "hamstrings",
-          "chest",
-          "back",
-          "lats",
-          "shoulders",
-          "core",
-        ],
-        preferredTags: ["full_body"],
-        template: ["squat", "hinge", "horizontal_press", "horizontal_pull", "vertical_pull"],
-        allowedPatterns: [
-          "squat",
-          "hinge",
-          "lunge",
-          "horizontal_press",
-          "vertical_press",
-          "horizontal_pull",
-          "vertical_pull",
-          "bodyweight_push",
-          "bodyweight_pull",
-          "core",
-          "calves",
-        ],
-        maxPatternRepeats: {
-          squat: 1,
-          hinge: 1,
-          lunge: 1,
-          horizontal_press: 1,
-          vertical_press: 1,
-          horizontal_pull: 1,
-          vertical_pull: 1,
-          bodyweight_push: 1,
-          bodyweight_pull: 1,
-          core: 1,
-          calves: 1,
-        },
-        maxPrimaryRepeats: 2,
-        fillPriorityPatterns: ["lunge", "core", "calves"],
-      };
-  }
-}
-
 function getDisplayBodyPart(exercise: Exercise, requestedBodyPart: BodyPart): string {
   if (requestedBodyPart === "push") {
     if (exercise.primaryMuscle === "chest") return "chest";
-    if (exercise.primaryMuscle === "triceps") return "arms";
+    if (["triceps"].includes(exercise.primaryMuscle)) return "arms";
     return "shoulders";
   }
 
   if (requestedBodyPart === "pull") {
-    if (
-      ["back", "lats", "upper_back", "rear_delts", "lower_back"].includes(
-        exercise.primaryMuscle
-      )
-    ) {
-      return "back";
-    }
-    return "arms";
+    if (["biceps", "forearms"].includes(exercise.primaryMuscle)) return "arms";
+    return "back";
   }
 
   if (requestedBodyPart === "full_body") {
-    if (["quads", "hamstrings", "glutes", "calves"].includes(exercise.primaryMuscle)) {
+    if (["quads", "glutes", "hamstrings", "calves"].includes(exercise.primaryMuscle)) {
       return "legs";
     }
     if (exercise.primaryMuscle === "chest") return "chest";
-    if (
-      ["back", "lats", "upper_back", "lower_back", "rear_delts"].includes(
-        exercise.primaryMuscle
-      )
-    ) {
+    if (["back", "lats", "upper_back", "lower_back", "rear_delts"].includes(exercise.primaryMuscle)) {
       return "back";
     }
     if (["biceps", "triceps", "forearms"].includes(exercise.primaryMuscle)) {
@@ -412,208 +167,700 @@ function getDisplayBodyPart(exercise: Exercise, requestedBodyPart: BodyPart): st
   return requestedBodyPart;
 }
 
-function getWorkoutTitle(bodyPart: BodyPart, goal: Goal): string {
-  const map: Record<BodyPart, string> = {
-    chest: "Chest Day",
-    back: "Back Day",
-    legs: "Leg Day",
-    shoulders: "Shoulder Day",
-    arms: "Arm Day",
-    push: "Push Day",
-    pull: "Pull Day",
-    full_body: "Full Body",
-  };
-
-  const goalLabel = goal.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
-  return `${map[bodyPart]} • ${goalLabel}`;
+function getIntensityLabel(
+  duration: number,
+  goal: Goal,
+  volumeTier: VolumeTier
+): "easy" | "moderate" | "hard" {
+  if (volumeTier === "brutal") return "hard";
+  if (goal === "strength" || duration >= 60 || volumeTier === "high") return "hard";
+  if (duration <= 30) return "easy";
+  return "moderate";
 }
 
-function getIntensityLabel(duration: number, goal: Goal): "easy" | "moderate" | "hard" {
-  if (duration <= 30) return "easy";
-  if (goal === "strength" || duration >= 60) return "hard";
-  return "moderate";
+function getWorkoutTitle(
+  bodyPart: BodyPart,
+  style: WorkoutStyle,
+  volumeTier: VolumeTier,
+  emphasis?: MuscleEmphasis | ""
+) {
+  const bodyPartLabel = toTitleCase(bodyPart);
+  const styleLabel = STYLE_LABELS[style];
+  const volumeLabel =
+    volumeTier === "moderate"
+      ? "Standard"
+      : volumeTier === "high"
+      ? "High Volume"
+      : "Brutal Volume";
+
+  if (emphasis) {
+    return `${bodyPartLabel} • ${styleLabel} • ${toTitleCase(emphasis)} Focus • ${volumeLabel}`;
+  }
+
+  return `${bodyPartLabel} • ${styleLabel} • ${volumeLabel}`;
 }
 
 function isExerciseValidForUser(
   exercise: Exercise,
   equipmentAccess: EquipmentAccess,
   experienceLevel: ExperienceLevel
-): boolean {
-  const matchesEquipment = exercise.equipmentAccess.includes(equipmentAccess);
-  const matchesLevel = exercise.levels.some(
-    (level) => experienceRank[level] <= experienceRank[experienceLevel]
+) {
+  const levelRank = {
+    beginner: 1,
+    intermediate: 2,
+    advanced: 3,
+  } as const;
+
+  const equipmentOk = exercise.equipmentAccess.includes(equipmentAccess);
+  const levelOk = exercise.levels.some(
+    (level) => levelRank[level] <= levelRank[experienceLevel]
   );
 
-  return matchesEquipment && matchesLevel;
+  return equipmentOk && levelOk;
 }
 
-function countMatchingSecondaryMuscles(
-  exercise: Exercise,
-  targetMuscles: Muscle[]
-): number {
-  return exercise.secondaryMuscles.filter((muscle) => targetMuscles.includes(muscle)).length;
+function getPoolForBodyPart(bodyPart: BodyPart) {
+  return exerciseLibrary.filter((exercise) => {
+    if (bodyPart === "push") {
+      return ["chest", "shoulders", "front_delts", "side_delts", "triceps"].includes(
+        exercise.primaryMuscle
+      );
+    }
+
+    if (bodyPart === "pull") {
+      return ["back", "lats", "upper_back", "lower_back", "rear_delts", "biceps", "forearms"].includes(
+        exercise.primaryMuscle
+      );
+    }
+
+    if (bodyPart === "full_body") {
+      return true;
+    }
+
+    if (bodyPart === "arms") {
+      return ["biceps", "triceps", "forearms"].includes(exercise.primaryMuscle);
+    }
+
+    if (bodyPart === "shoulders") {
+      return ["shoulders", "front_delts", "side_delts", "rear_delts"].includes(exercise.primaryMuscle);
+    }
+
+    if (bodyPart === "legs") {
+      return ["quads", "glutes", "hamstrings", "calves"].includes(exercise.primaryMuscle);
+    }
+
+    if (bodyPart === "chest") {
+      return ["chest", "front_delts", "triceps"].includes(exercise.primaryMuscle);
+    }
+
+    if (bodyPart === "back") {
+      return ["back", "lats", "upper_back", "lower_back", "rear_delts", "biceps"].includes(
+        exercise.primaryMuscle
+      );
+    }
+
+    return false;
+  });
 }
 
-function countMatchingTags(exercise: Exercise, preferredTags: WorkoutTag[]): number {
-  return exercise.workoutTags.filter((tag) => preferredTags.includes(tag)).length;
+function buildSlotSelector(slot: TemplateSlot, bodyPart: BodyPart, emphasis?: MuscleEmphasis | "") {
+  return (exercise: Exercise) => {
+    switch (slot) {
+      case "primary_press":
+        return (
+          exercise.category === "main" &&
+          exercise.movementPattern === "horizontal_press" &&
+          exercise.primaryMuscle === "chest"
+        );
+
+      case "secondary_press":
+        return (
+          ["main", "accessory"].includes(exercise.category) &&
+          exercise.movementPattern === "horizontal_press" &&
+          exercise.primaryMuscle === "chest"
+        );
+
+      case "upper_bias_press":
+        return (
+          ["main", "accessory"].includes(exercise.category) &&
+          exercise.movementPattern === "horizontal_press" &&
+          exercise.emphasis?.includes("upper_chest")
+        );
+
+      case "stable_press":
+        return (
+          ["main", "accessory"].includes(exercise.category) &&
+          exercise.movementPattern === "horizontal_press" &&
+          exercise.isStable
+        );
+
+      case "stretch_chest_iso":
+        return (
+          exercise.category === "isolation" &&
+          exercise.primaryMuscle === "chest" &&
+          exercise.movementPattern === "fly"
+        );
+
+      case "squeeze_chest_iso":
+        return (
+          exercise.category === "isolation" &&
+          exercise.primaryMuscle === "chest" &&
+          exercise.movementPattern === "fly" &&
+          exercise.isStable
+        );
+
+      case "back_row_primary":
+        return (
+          exercise.category === "main" &&
+          exercise.movementPattern === "horizontal_pull"
+        );
+
+      case "back_row_secondary":
+        return (
+          ["main", "accessory"].includes(exercise.category) &&
+          exercise.movementPattern === "horizontal_pull"
+        );
+
+      case "back_vertical_pull":
+        return (
+          ["main", "accessory"].includes(exercise.category) &&
+          (exercise.movementPattern === "vertical_pull" ||
+            exercise.movementPattern === "bodyweight_pull")
+        );
+
+      case "lat_isolation":
+        return (
+          exercise.primaryMuscle === "lats" &&
+          (exercise.emphasis?.includes("lat_width") ||
+            exercise.movementPattern === "vertical_pull")
+        );
+
+      case "legs_primary_squat":
+        return exercise.category === "main" && exercise.movementPattern === "squat";
+
+      case "legs_primary_hinge":
+        return exercise.category === "main" && exercise.movementPattern === "hinge";
+
+      case "legs_secondary_quad":
+        return (
+          ["main", "accessory"].includes(exercise.category) &&
+          (exercise.movementPattern === "squat" || exercise.movementPattern === "lunge") &&
+          ["quads", "glutes"].includes(exercise.primaryMuscle)
+        );
+
+      case "legs_secondary_ham":
+        return (
+          ["main", "accessory", "isolation"].includes(exercise.category) &&
+          exercise.primaryMuscle === "hamstrings"
+        );
+
+      case "legs_quad_iso":
+        return (
+          exercise.category === "isolation" &&
+          exercise.primaryMuscle === "quads"
+        );
+
+      case "legs_ham_iso":
+        return (
+          exercise.category === "isolation" &&
+          exercise.primaryMuscle === "hamstrings"
+        );
+
+      case "calves":
+        return exercise.primaryMuscle === "calves";
+
+      case "shoulder_press":
+        return (
+          ["main", "accessory"].includes(exercise.category) &&
+          exercise.movementPattern === "vertical_press"
+        );
+
+      case "side_delt":
+        return (
+          exercise.primaryMuscle === "side_delts" &&
+          exercise.movementPattern === "raise"
+        );
+
+      case "rear_delt":
+        return (
+          exercise.primaryMuscle === "rear_delts" &&
+          exercise.movementPattern === "raise"
+        );
+
+      case "biceps_primary":
+        return (
+          ["accessory", "isolation"].includes(exercise.category) &&
+          exercise.primaryMuscle === "biceps" &&
+          exercise.movementPattern === "curl"
+        );
+
+      case "biceps_secondary":
+        return exercise.primaryMuscle === "biceps";
+
+      case "triceps_primary":
+        return (
+          ["accessory", "isolation"].includes(exercise.category) &&
+          exercise.primaryMuscle === "triceps" &&
+          exercise.movementPattern === "tricep_extension"
+        );
+
+      case "triceps_secondary":
+        return exercise.primaryMuscle === "triceps";
+
+      case "core":
+        return exercise.primaryMuscle === "core";
+
+      case "finisher":
+        if (bodyPart === "chest") {
+          return ["chest", "triceps", "front_delts"].includes(exercise.primaryMuscle);
+        }
+        if (bodyPart === "back") {
+          return ["back", "lats", "upper_back", "biceps", "rear_delts"].includes(exercise.primaryMuscle);
+        }
+        if (bodyPart === "legs") {
+          return ["quads", "glutes", "hamstrings", "calves"].includes(exercise.primaryMuscle);
+        }
+        if (bodyPart === "shoulders") {
+          return ["shoulders", "front_delts", "side_delts", "rear_delts"].includes(exercise.primaryMuscle);
+        }
+        if (bodyPart === "arms") {
+          return ["biceps", "triceps", "forearms"].includes(exercise.primaryMuscle);
+        }
+        return true;
+
+      default:
+        return false;
+    }
+  };
 }
 
-function getPatternCount(selected: Exercise[], pattern: MovementPattern): number {
-  return selected.filter((exercise) => exercise.movementPattern === pattern).length;
-}
+function getTemplate(
+  bodyPart: BodyPart,
+  volumeTier: VolumeTier,
+  emphasis?: MuscleEmphasis | ""
+): SlotDefinition[] {
+  const upperChestBias = emphasis === "upper_chest";
+  const latBias = emphasis === "lat_width";
+  const quadBias = emphasis === "quad_bias";
+  const hamBias = emphasis === "hamstring_bias";
+  const sideDeltBias = emphasis === "side_delt_bias";
 
-function getPrimaryCount(selected: Exercise[], primary: Muscle): number {
-  return selected.filter((exercise) => exercise.primaryMuscle === primary).length;
-}
+  if (bodyPart === "chest") {
+    if (volumeTier === "brutal") {
+      return [
+        { slot: upperChestBias ? "upper_bias_press" : "primary_press", sets: 4 },
+        { slot: "secondary_press", sets: 4 },
+        { slot: "upper_bias_press", sets: 4 },
+        { slot: "stable_press", sets: 4 },
+        { slot: "stretch_chest_iso", sets: 3 },
+        { slot: "squeeze_chest_iso", sets: 3 },
+        { slot: "finisher", sets: 2 },
+      ];
+    }
 
-function hasCategory(selected: Exercise[], category: ExerciseCategory): boolean {
-  return selected.some((exercise) => exercise.category === category);
-}
+    if (volumeTier === "high") {
+      return [
+        { slot: upperChestBias ? "upper_bias_press" : "primary_press", sets: 4 },
+        { slot: "secondary_press", sets: 4 },
+        { slot: "stable_press", sets: 3 },
+        { slot: "stretch_chest_iso", sets: 3 },
+        { slot: "squeeze_chest_iso", sets: 3 },
+        { slot: "finisher", sets: 2 },
+      ];
+    }
 
-function hasPattern(selected: Exercise[], pattern: MovementPattern): boolean {
-  return selected.some((exercise) => exercise.movementPattern === pattern);
-}
-
-function hasPrimary(selected: Exercise[], primary: Muscle): boolean {
-  return selected.some((exercise) => exercise.primaryMuscle === primary);
-}
-
-function violatesRepeatRules(
-  exercise: Exercise,
-  selected: Exercise[],
-  rules: WorkoutRules
-): boolean {
-  const maxPattern = rules.maxPatternRepeats[exercise.movementPattern];
-  if (
-    maxPattern !== undefined &&
-    getPatternCount(selected, exercise.movementPattern) >= maxPattern
-  ) {
-    return true;
+    return [
+      { slot: upperChestBias ? "upper_bias_press" : "primary_press", sets: 4 },
+      { slot: "secondary_press", sets: 3 },
+      { slot: "stretch_chest_iso", sets: 3 },
+      { slot: "squeeze_chest_iso", sets: 2 },
+      { slot: "finisher", sets: 2 },
+    ];
   }
 
-  if (getPrimaryCount(selected, exercise.primaryMuscle) >= rules.maxPrimaryRepeats) {
-    return true;
+  if (bodyPart === "back") {
+    if (volumeTier === "brutal") {
+      return [
+        { slot: latBias ? "back_vertical_pull" : "back_row_primary", sets: 4 },
+        { slot: "back_vertical_pull", sets: 4 },
+        { slot: "back_row_secondary", sets: 4 },
+        { slot: "back_vertical_pull", sets: 3 },
+        { slot: "lat_isolation", sets: 3 },
+        { slot: "back_row_secondary", sets: 3 },
+        { slot: "finisher", sets: 2 },
+      ];
+    }
+
+    if (volumeTier === "high") {
+      return [
+        { slot: latBias ? "back_vertical_pull" : "back_row_primary", sets: 4 },
+        { slot: "back_vertical_pull", sets: 4 },
+        { slot: "back_row_secondary", sets: 3 },
+        { slot: "lat_isolation", sets: 3 },
+        { slot: "back_row_secondary", sets: 3 },
+        { slot: "finisher", sets: 2 },
+      ];
+    }
+
+    return [
+      { slot: latBias ? "back_vertical_pull" : "back_row_primary", sets: 4 },
+      { slot: "back_vertical_pull", sets: 3 },
+      { slot: "back_row_secondary", sets: 3 },
+      { slot: "lat_isolation", sets: 3 },
+      { slot: "finisher", sets: 2 },
+    ];
   }
 
-  return false;
+  if (bodyPart === "legs") {
+    if (volumeTier === "brutal") {
+      return [
+        { slot: quadBias ? "legs_primary_squat" : hamBias ? "legs_primary_hinge" : "legs_primary_squat", sets: 4 },
+        { slot: hamBias ? "legs_primary_hinge" : "legs_primary_hinge", sets: 4 },
+        { slot: "legs_secondary_quad", sets: 4 },
+        { slot: "legs_secondary_ham", sets: 3 },
+        { slot: "legs_quad_iso", sets: 3 },
+        { slot: "legs_ham_iso", sets: 3 },
+        { slot: "calves", sets: 4 },
+      ];
+    }
+
+    if (volumeTier === "high") {
+      return [
+        { slot: quadBias ? "legs_primary_squat" : hamBias ? "legs_primary_hinge" : "legs_primary_squat", sets: 4 },
+        { slot: "legs_primary_hinge", sets: 4 },
+        { slot: "legs_secondary_quad", sets: 3 },
+        { slot: "legs_ham_iso", sets: 3 },
+        { slot: "legs_quad_iso", sets: 3 },
+        { slot: "calves", sets: 4 },
+      ];
+    }
+
+    return [
+      { slot: quadBias ? "legs_primary_squat" : "legs_primary_hinge", sets: 4 },
+      { slot: "legs_secondary_quad", sets: 3 },
+      { slot: "legs_ham_iso", sets: 3 },
+      { slot: "legs_quad_iso", sets: 2 },
+      { slot: "calves", sets: 3 },
+    ];
+  }
+
+  if (bodyPart === "shoulders") {
+    if (volumeTier === "brutal") {
+      return [
+        { slot: "shoulder_press", sets: 4 },
+        { slot: "side_delt", sets: sideDeltBias ? 5 : 4 },
+        { slot: "rear_delt", sets: 4 },
+        { slot: "shoulder_press", sets: 3 },
+        { slot: "side_delt", sets: 4 },
+        { slot: "rear_delt", sets: 3 },
+      ];
+    }
+
+    if (volumeTier === "high") {
+      return [
+        { slot: "shoulder_press", sets: 4 },
+        { slot: "side_delt", sets: sideDeltBias ? 5 : 4 },
+        { slot: "rear_delt", sets: 3 },
+        { slot: "side_delt", sets: 3 },
+        { slot: "rear_delt", sets: 3 },
+      ];
+    }
+
+    return [
+      { slot: "shoulder_press", sets: 4 },
+      { slot: "side_delt", sets: 3 },
+      { slot: "rear_delt", sets: 3 },
+      { slot: "side_delt", sets: 3 },
+    ];
+  }
+
+  if (bodyPart === "arms") {
+    if (volumeTier === "brutal") {
+      return [
+        { slot: "biceps_primary", sets: 4 },
+        { slot: "triceps_primary", sets: 4 },
+        { slot: "biceps_secondary", sets: 4 },
+        { slot: "triceps_secondary", sets: 4 },
+        { slot: "biceps_secondary", sets: 3 },
+        { slot: "triceps_secondary", sets: 3 },
+      ];
+    }
+
+    if (volumeTier === "high") {
+      return [
+        { slot: "biceps_primary", sets: 4 },
+        { slot: "triceps_primary", sets: 4 },
+        { slot: "biceps_secondary", sets: 3 },
+        { slot: "triceps_secondary", sets: 3 },
+        { slot: "biceps_secondary", sets: 3 },
+        { slot: "triceps_secondary", sets: 3 },
+      ];
+    }
+
+    return [
+      { slot: "biceps_primary", sets: 3 },
+      { slot: "triceps_primary", sets: 3 },
+      { slot: "biceps_secondary", sets: 3 },
+      { slot: "triceps_secondary", sets: 3 },
+    ];
+  }
+
+  if (bodyPart === "push") {
+    return [
+      ...getTemplate("chest", volumeTier === "brutal" ? "high" : "moderate", emphasis).slice(0, 3),
+      ...getTemplate("shoulders", "moderate", emphasis).slice(0, 2),
+      ...getTemplate("arms", "moderate", emphasis).slice(1, 2),
+    ];
+  }
+
+  if (bodyPart === "pull") {
+    return [
+      ...getTemplate("back", volumeTier === "brutal" ? "high" : "moderate", emphasis).slice(0, 4),
+      { slot: "rear_delt", sets: 3 },
+      { slot: "biceps_primary", sets: 3 },
+    ];
+  }
+
+  if (bodyPart === "full_body") {
+    return [
+      { slot: "legs_primary_squat", sets: 3 },
+      { slot: "back_row_primary", sets: 3 },
+      { slot: "primary_press", sets: 3 },
+      { slot: "back_vertical_pull", sets: 3 },
+      { slot: "shoulder_press", sets: 2 },
+      { slot: "core", sets: 3 },
+    ];
+  }
+
+  return [{ slot: "core", sets: 3 }];
 }
 
-function getGoalAdjustedReps(
-  goal: Goal,
-  exercise: Exercise,
-  defaultReps: string
-): string {
+function scoreExerciseForStyle(exercise: Exercise, style: WorkoutStyle) {
+  let score = 0;
+
+  if (exercise.styleTags?.includes(style)) score += 6;
+
+  if (style === "bodybuilding") {
+    if (exercise.isStable) score += 2;
+    if (exercise.category === "isolation") score += 2;
+    if (exercise.fatigueCost <= 3) score += 1;
+  }
+
+  if (style === "high_volume") {
+    if (exercise.fatigueCost <= 3) score += 3;
+    if (exercise.category !== "main") score += 2;
+    if (exercise.isStable) score += 2;
+  }
+
+  if (style === "old_school_mass") {
+    if (exercise.equipmentTypes.includes("barbell") || exercise.equipmentTypes.includes("dumbbell")) {
+      score += 3;
+    }
+    if (exercise.category === "main") score += 2;
+  }
+
+  if (style === "intensity") {
+    if (exercise.isStable) score += 3;
+    if (exercise.category !== "main") score += 2;
+  }
+
+  if (style === "pump") {
+    if (exercise.category === "isolation") score += 3;
+    if (exercise.isStable) score += 2;
+  }
+
+  if (style === "strength_size") {
+    if (exercise.category === "main") score += 3;
+    if (["horizontal_press", "vertical_press", "horizontal_pull", "vertical_pull", "squat", "hinge"].includes(exercise.movementPattern)) {
+      score += 2;
+    }
+  }
+
+  return score;
+}
+
+function scoreExerciseForGoal(exercise: Exercise, goal: Goal) {
+  let score = 0;
+
   if (goal === "strength") {
-    if (exercise.movementPattern === "hinge" || exercise.movementPattern === "squat") {
-      return exercise.category === "main" ? "3-5" : "5-8";
+    if (exercise.category === "main") score += 6;
+    if (["horizontal_press", "vertical_press", "horizontal_pull", "vertical_pull", "squat", "hinge"].includes(exercise.movementPattern)) {
+      score += 3;
     }
-    if (
-      exercise.movementPattern === "horizontal_press" ||
-      exercise.movementPattern === "vertical_press" ||
-      exercise.movementPattern === "horizontal_pull" ||
-      exercise.movementPattern === "vertical_pull" ||
-      exercise.movementPattern === "bodyweight_pull"
-    ) {
-      return exercise.category === "main" ? "4-6" : "6-8";
-    }
+    if (exercise.category === "isolation") score -= 4;
   }
 
   if (goal === "hypertrophy") {
-    if (
-      exercise.movementPattern === "raise" ||
-      exercise.movementPattern === "curl" ||
-      exercise.movementPattern === "tricep_extension" ||
-      exercise.movementPattern === "fly" ||
-      exercise.movementPattern === "calves" ||
-      exercise.movementPattern === "core"
-    ) {
-      return "10-15";
-    }
+    if (exercise.category === "accessory") score += 3;
+    if (exercise.category === "isolation") score += 4;
+    if (exercise.isStable) score += 1;
   }
 
   if (goal === "fat_loss") {
-    if (
-      exercise.movementPattern === "core" ||
-      exercise.movementPattern === "lunge" ||
-      exercise.movementPattern === "bodyweight_push" ||
-      exercise.movementPattern === "bodyweight_pull"
-    ) {
-      return "12-15";
-    }
+    if (exercise.category === "accessory") score += 2;
+    if (["lunge", "core", "bodyweight_push", "bodyweight_pull"].includes(exercise.movementPattern)) score += 2;
   }
 
-  return defaultReps;
+  if (goal === "general") {
+    if (exercise.category !== "main") score += 1;
+  }
+
+  return score;
 }
 
-function getRestSeconds(goal: Goal, exercise: Exercise): number {
-  const base = repSchemes[goal][exercise.category].restSeconds;
+function scoreExerciseForEmphasis(exercise: Exercise, emphasis?: MuscleEmphasis | "") {
+  if (!emphasis) return 0;
+  if (exercise.emphasis?.includes(emphasis)) return 6;
+  return 0;
+}
 
-  if (goal === "strength") {
-    if (
-      exercise.movementPattern === "squat" ||
-      exercise.movementPattern === "hinge" ||
-      exercise.movementPattern === "horizontal_press" ||
-      exercise.movementPattern === "vertical_press"
-    ) {
-      return Math.max(base, 120);
-    }
+function scoreExerciseForRecovery(exercise: Exercise, soreAreas: string[], fatiguedAreas: string[]) {
+  let score = 0;
+
+  if (
+    exercise.jointStressAreas.some((area) => soreAreas.includes(area.toLowerCase()))
+  ) {
+    score -= exercise.jointStress === "high" ? 12 : exercise.jointStress === "moderate" ? 7 : 3;
   }
 
-  if (goal === "fat_loss" && exercise.category === "isolation") {
+  if (
+    fatiguedAreas.includes(exercise.primaryMuscle.toLowerCase()) ||
+    exercise.secondaryMuscles.some((muscle) => fatiguedAreas.includes(muscle.toLowerCase()))
+  ) {
+    score -= 8;
+  }
+
+  return score;
+}
+
+function scoreExerciseForPreference(
+  exercise: Exercise,
+  preferredExercises: string[],
+  recentExerciseIds: string[]
+) {
+  let score = 0;
+  if (preferredExercises.includes(exercise.id.toLowerCase())) score += 12;
+  if (recentExerciseIds.includes(exercise.id.toLowerCase())) score -= 8;
+  return score;
+}
+
+function pickRepRange(goal: Goal, style: WorkoutStyle, exercise: Exercise) {
+  if (goal === "strength") {
+    if (exercise.category === "main") return "4-6";
+    if (exercise.category === "accessory") return "6-8";
+    return "8-12";
+  }
+
+  if (style === "pump") {
+    if (exercise.category === "main") return "8-10";
+    if (exercise.category === "accessory") return "10-15";
+    return "12-20";
+  }
+
+  if (style === "high_volume") {
+    if (exercise.category === "main") return "6-10";
+    if (exercise.category === "accessory") return "8-12";
+    return "12-20";
+  }
+
+  if (style === "bodybuilding") {
+    if (exercise.category === "main") return "6-8";
+    if (exercise.category === "accessory") return "8-12";
+    return "10-15";
+  }
+
+  if (style === "strength_size") {
+    if (exercise.category === "main") return "5-8";
+    if (exercise.category === "accessory") return "8-10";
+    return "10-15";
+  }
+
+  if (goal === "fat_loss") {
+    if (exercise.category === "main") return "8-10";
+    if (exercise.category === "accessory") return "10-12";
+    return "12-15";
+  }
+
+  if (goal === "general") {
+    if (exercise.category === "main") return "6-10";
+    if (exercise.category === "accessory") return "8-12";
+    return "10-15";
+  }
+
+  if (exercise.category === "main") return "6-8";
+  if (exercise.category === "accessory") return "8-12";
+  return "10-15";
+}
+
+function getRestSeconds(goal: Goal, style: WorkoutStyle, exercise: Exercise) {
+  if (goal === "strength") {
+    if (exercise.category === "main") return 150;
+    if (exercise.category === "accessory") return 105;
+    return 75;
+  }
+
+  if (style === "pump") {
+    if (exercise.category === "main") return 75;
+    if (exercise.category === "accessory") return 50;
     return 40;
   }
 
-  return base;
+  if (style === "high_volume") {
+    if (exercise.category === "main") return 90;
+    if (exercise.category === "accessory") return 60;
+    return 45;
+  }
+
+  if (exercise.category === "main") return 105;
+  if (exercise.category === "accessory") return 75;
+  return 60;
 }
 
-function getTargetWeightHint(exercise: Exercise): number | null {
-  const enhanced = exercise as EnhancedExercise;
-  if (enhanced.progressionType === "time_hold") return null;
-  return null;
-}
+function buildExerciseCoachingNote(exercise: Exercise, goal: Goal, style: WorkoutStyle, slot: TemplateSlot) {
+  if (slot === "finisher") {
+    return "Finisher work. Push hard, chase tension, and end the session with intent.";
+  }
 
-function buildExerciseCoachingNote(exercise: Exercise, goal: Goal): string {
   if (exercise.category === "main") {
     if (goal === "strength") {
-      return "Main lift. Prioritize crisp reps, bracing, and steady force output.";
+      return "Main lift. Prioritize crisp reps, setup, and force output.";
     }
-    if (goal === "hypertrophy") {
-      return "Main movement. Push hard, but keep the eccentric controlled and clean.";
+    if (style === "bodybuilding" || style === "high_volume") {
+      return "Main movement. Push hard, but keep reps controlled and repeatable.";
     }
-    if (goal === "fat_loss") {
-      return "Drive effort here, but do not let form break down chasing pace.";
-    }
-    return "Main movement. Focus on clean execution and repeatable performance.";
+    return "Main movement. Own your setup and execute clean working sets.";
   }
 
   if (exercise.category === "accessory") {
-    return "Controlled working sets. Own the range of motion and keep quality high.";
+    return "Accessory work. Controlled reps, strong range of motion, and honest effort.";
   }
 
-  return "Isolation work. Chase tension and technique instead of ego weight.";
+  return "Isolation work. Keep tension on the target muscle and avoid ego loading.";
 }
 
 function buildExerciseReason(
   exercise: Exercise,
   bodyPart: BodyPart,
-  goal: Goal
-): string {
-  const displayPattern = exercise.movementPattern.replaceAll("_", " ");
-  const displayBodyPart = toTitleCase(bodyPart);
-  const displayGoal = goal.replaceAll("_", " ");
-
-  if (exercise.category === "main") {
-    return `Included as a primary ${displayPattern} to anchor your ${displayBodyPart.toLowerCase()} ${displayGoal} session.`;
+  slot: TemplateSlot,
+  emphasis?: MuscleEmphasis | ""
+) {
+  if (slot === "primary_press" || slot === "back_row_primary" || slot === "legs_primary_squat" || slot === "legs_primary_hinge" || slot === "shoulder_press") {
+    return "Included as a primary anchor movement to drive the session.";
   }
 
-  if (exercise.category === "accessory") {
-    return `Supports the main work by adding quality volume for ${exercise.primaryMuscle.replaceAll(
-      "_",
-      " "
-    )}.`;
+  if (slot === "finisher") {
+    return "Included to finish the session with extra fatigue and stimulus.";
   }
 
-  return `Adds targeted isolation volume and helps round out the session without excessive fatigue.`;
+  if (emphasis && exercise.emphasis?.includes(emphasis)) {
+    return `Included to support your ${toTitleCase(emphasis)} emphasis.`;
+  }
+
+  if (exercise.category === "isolation") {
+    return "Included for targeted isolation volume and a better hypertrophy stimulus.";
+  }
+
+  return `Included to round out your ${toTitleCase(bodyPart)} session with better movement balance.`;
 }
 
 function buildCoachNote(params: {
@@ -624,597 +871,185 @@ function buildCoachNote(params: {
   equipmentAccess: EquipmentAccess;
   soreAreas: string[];
   fatiguedAreas: string[];
+  style: WorkoutStyle;
+  volumeTier: VolumeTier;
+  emphasis?: MuscleEmphasis | "";
+  totalWorkingSets: number;
 }) {
-  const { goal, bodyPart, experienceLevel, duration, equipmentAccess, soreAreas, fatiguedAreas } =
-    params;
+  const {
+    goal,
+    bodyPart,
+    experienceLevel,
+    duration,
+    equipmentAccess,
+    soreAreas,
+    fatiguedAreas,
+    style,
+    volumeTier,
+    emphasis,
+    totalWorkingSets,
+  } = params;
 
-  const intro =
-    goal === "strength"
-      ? "This session is built around stronger compounds and lower-rep quality work."
-      : goal === "hypertrophy"
-      ? "This session is built to create solid muscle stimulus with balanced volume."
-      : goal === "fat_loss"
-      ? "This session is built to keep density high while still preserving productive lifting."
-      : "This session balances performance, volume, and consistency.";
+  const styleText =
+    style === "bodybuilding"
+      ? "This session is built with a bodybuilding bias: solid compounds, stable accessories, and targeted pump work."
+      : style === "high_volume"
+      ? "This session is built to push a lot of productive hypertrophy volume."
+      : style === "old_school_mass"
+      ? "This session leans into a heavier old-school mass-building feel."
+      : style === "pump"
+      ? "This session is built to chase tension, short rests, and a big pump."
+      : style === "strength_size"
+      ? "This session blends heavier loading with enough volume to grow."
+      : style === "intensity"
+      ? "This session is built around hard work, lower fluff, and strong effort."
+      : "This session balances quality compounds, useful accessories, and recoverable volume.";
 
-  const context = ` Focus is ${toTitleCase(bodyPart)} for a ${duration}-minute session with ${toTitleCase(
+  const focus = ` Focus is ${toTitleCase(bodyPart)} with ${totalWorkingSets} working sets across roughly ${duration} minutes using ${toTitleCase(
     equipmentAccess
-  ).toLowerCase()}. Programming is scaled for a ${experienceLevel} lifter.`;
+  ).toLowerCase()}.`;
+
+  const level = ` Programming is scaled for a ${experienceLevel} lifter.`;
+
+  const goalNote =
+    goal === "strength"
+      ? " Main lifts should stay crisp and powerful."
+      : goal === "hypertrophy"
+      ? " Keep tension high and execution clean."
+      : goal === "fat_loss"
+      ? " Keep the pace honest without sacrificing lifting quality."
+      : " Aim for clean progression and consistency.";
+
+  const emphasisNote = emphasis ? ` Extra selection bias was applied toward ${toTitleCase(emphasis)}.` : "";
+
+  const volumeNote =
+    volumeTier === "brutal"
+      ? " This is a high-demand session, so do not waste effort on junk reps."
+      : volumeTier === "high"
+      ? " Expect a fuller session with meaningful volume."
+      : "";
 
   const recovery =
     soreAreas.length || fatiguedAreas.length
-      ? ` Recovery inputs were considered${soreAreas.length ? `, especially soreness in ${soreAreas.join(", ")}` : ""}${
-          fatiguedAreas.length ? `${soreAreas.length ? " and" : ""} fatigue around ${fatiguedAreas.join(", ")}` : ""
+      ? ` Recovery inputs were considered${soreAreas.length ? `, especially soreness around ${soreAreas.join(", ")}` : ""}${
+          fatiguedAreas.length ? `${soreAreas.length ? " and" : ""} fatigue in ${fatiguedAreas.join(", ")}` : ""
         }.`
       : "";
 
-  return `${intro}${context}${recovery}`;
+  return `${styleText}${focus}${level}${goalNote}${emphasisNote}${volumeNote}${recovery}`;
 }
 
-function buildProgressionAdvice(goal: Goal, selected: Exercise[]): string[] {
+function buildProgressionAdvice(goal: Goal, style: WorkoutStyle, bodyPart: BodyPart, totalWorkingSets: number) {
   const advice = [
     "Try to beat last time by 1 rep on at least one or two movements.",
-    "When every set reaches the top of the rep range with clean form, increase load next session.",
+    "When all sets hit the top of the rep range cleanly, increase the load next time.",
   ];
 
   if (goal === "strength") {
-    advice.push("Leave a little in the tank on compounds instead of grinding every set to failure.");
-  } else if (goal === "hypertrophy") {
-    advice.push("Use controlled eccentrics and keep tension on the target muscle.");
-  } else if (goal === "fat_loss") {
-    advice.push("Keep rest periods honest and move with intent to maintain session density.");
+    advice.push("Protect bar speed and technique on primary lifts instead of grinding every set.");
+  } else if (style === "high_volume" || style === "bodybuilding") {
+    advice.push("Use controlled eccentrics and keep tension on the target muscle instead of rushing reps.");
+  } else if (style === "pump") {
+    advice.push("Keep rest periods tight and focus on clean continuous reps.");
   } else {
-    advice.push("Prioritize consistency and clean reps before aggressively pushing load.");
+    advice.push("Prioritize consistency and repeatable execution before forcing load jumps.");
   }
 
-  if (selected.some((exercise) => exercise.movementPattern === "core")) {
-    advice.push("For core work, build reps or hold time before increasing difficulty.");
+  if (bodyPart === "legs" && totalWorkingSets >= 20) {
+    advice.push("For high-volume leg days, keep the first big movement honest so you do not die halfway through.");
+  }
+
+  if (bodyPart === "shoulders" || bodyPart === "arms") {
+    advice.push("On smaller-muscle work, own the tempo before chasing more weight.");
   }
 
   return advice;
 }
 
-function getExerciseScore(params: {
-  exercise: Exercise;
-  rules: WorkoutRules;
-  desiredPattern?: MovementPattern;
-  selected: Exercise[];
-  bodyPart: BodyPart;
-  goal: Goal;
-  soreAreas: string[];
-  fatiguedAreas: string[];
-  preferredExercises: string[];
-}): number {
-  const {
-    exercise,
-    rules,
-    desiredPattern,
-    selected,
-    bodyPart,
-    goal,
-    soreAreas,
-    fatiguedAreas,
-    preferredExercises,
-  } = params;
+function getEstimatedDurationFromSets(totalSets: number, style: WorkoutStyle, fallbackDuration: number) {
+  const secondsPerSet =
+    style === "strength_size"
+      ? 200
+      : style === "old_school_mass"
+      ? 190
+      : style === "high_volume"
+      ? 160
+      : style === "pump"
+      ? 140
+      : 170;
 
-  const enhanced = exercise as EnhancedExercise;
-  let score = 0;
+  const bufferMinutes = 8;
+  const computed = Math.round((totalSets * secondsPerSet) / 60 + bufferMinutes);
 
-  if (desiredPattern && exercise.movementPattern === desiredPattern) {
-    score += 14;
-  }
-
-  if (rules.allowedPatterns.includes(exercise.movementPattern)) {
-    score += 4;
-  }
-
-  if (rules.targetMuscles.includes(exercise.primaryMuscle)) {
-    score += 9;
-  }
-
-  score += countMatchingSecondaryMuscles(exercise, rules.targetMuscles) * 2;
-  score += countMatchingTags(exercise, rules.preferredTags) * 2;
-
-  if (!hasCategory(selected, "main") && exercise.category === "main") {
-    score += 6;
-  }
-
-  if (preferredExercises.includes(exercise.id.toLowerCase())) {
-    score += 14;
-  }
-
-  if (goal === "strength") {
-    if (exercise.category === "main") score += 7;
-    if (
-      [
-        "squat",
-        "hinge",
-        "horizontal_press",
-        "vertical_press",
-        "horizontal_pull",
-        "vertical_pull",
-        "bodyweight_pull",
-      ].includes(exercise.movementPattern)
-    ) {
-      score += 4;
-    }
-    if (exercise.category === "isolation") score -= 4;
-  }
-
-  if (goal === "hypertrophy") {
-    if (exercise.category === "accessory") score += 3;
-    if (exercise.category === "isolation") score += 4;
-    if (["raise", "curl", "tricep_extension", "fly"].includes(exercise.movementPattern)) {
-      score += 2;
-    }
-  }
-
-  if (goal === "fat_loss") {
-    if (exercise.category === "accessory") score += 3;
-    if (exercise.category === "isolation") score += 1;
-    if (
-      ["lunge", "bodyweight_push", "bodyweight_pull", "core"].includes(
-        exercise.movementPattern
-      )
-    ) {
-      score += 3;
-    }
-    if (exercise.category === "main" && exercise.movementPattern === "hinge") {
-      score -= 2;
-    }
-  }
-
-  if (goal === "general") {
-    if (exercise.category === "accessory") score += 2;
-  }
-
-  const samePatternCount = getPatternCount(selected, exercise.movementPattern);
-  if (samePatternCount > 0) {
-    score -= samePatternCount * 5;
-  }
-
-  const samePrimaryCount = getPrimaryCount(selected, exercise.primaryMuscle);
-  if (samePrimaryCount > 0) {
-    score -= samePrimaryCount * 3;
-  }
-
-  if (bodyPart === "chest" && exercise.primaryMuscle === "triceps") score -= 2;
-  if (bodyPart === "back" && exercise.primaryMuscle === "biceps") score -= 2;
-  if (bodyPart === "shoulders" && exercise.movementPattern === "horizontal_press") score -= 4;
-
-  if (
-    bodyPart === "arms" &&
-    ["horizontal_press", "vertical_press", "hinge", "squat"].includes(
-      exercise.movementPattern
-    )
-  ) {
-    score -= 8;
-  }
-
-  if (bodyPart === "legs") {
-    if (exercise.primaryMuscle === "calves" && selected.length < 2) {
-      score -= 6;
-    }
-    if (selected.length < 2 && ["calves", "core"].includes(exercise.movementPattern)) {
-      score -= 4;
-    }
-  }
-
-  if (bodyPart === "full_body") {
-    if (selected.length === 0 && !["squat", "hinge"].includes(exercise.movementPattern)) {
-      score -= 6;
-    }
-    if (
-      selected.length === 1 &&
-      exercise.movementPattern === "hinge" &&
-      hasPattern(selected, "hinge")
-    ) {
-      score -= 6;
-    }
-  }
-
-  if (bodyPart === "push" && exercise.movementPattern === "curl") {
-    score -= 10;
-  }
-
-  if (bodyPart === "pull" && exercise.movementPattern === "tricep_extension") {
-    score -= 10;
-  }
-
-  if (
-    soreAreas.length > 0 &&
-    enhanced.jointStressAreas?.some((area) => soreAreas.includes(area.toLowerCase()))
-  ) {
-    score -= enhanced.jointStress === "high" ? 12 : enhanced.jointStress === "moderate" ? 7 : 3;
-  }
-
-  if (
-    fatiguedAreas.length > 0 &&
-    (fatiguedAreas.includes(exercise.primaryMuscle.toLowerCase()) ||
-      exercise.secondaryMuscles.some((muscle) => fatiguedAreas.includes(muscle.toLowerCase())))
-  ) {
-    score -= 8;
-  }
-
-  if (typeof enhanced.fatigueCost === "number") {
-    score -= enhanced.fatigueCost * 1.25;
-  } else {
-    if (exercise.category === "main") score -= 2;
-  }
-
-  if (enhanced.isStable && goal === "hypertrophy") {
-    score += 2;
-  }
-
-  return score;
+  return Math.max(fallbackDuration, computed);
 }
 
 function pickBestExercise(params: {
   candidates: Exercise[];
-  rules: WorkoutRules;
   selected: Exercise[];
-  usedIds: Set<string>;
-  desiredPattern?: MovementPattern;
-  bodyPart: BodyPart;
+  style: WorkoutStyle;
   goal: Goal;
+  emphasis?: MuscleEmphasis | "";
   soreAreas: string[];
   fatiguedAreas: string[];
   preferredExercises: string[];
-}): Exercise | null {
+  recentExerciseIds: string[];
+  usedIds: Set<string>;
+  allowSameMovement?: boolean;
+}) {
   const {
     candidates,
-    rules,
     selected,
-    usedIds,
-    desiredPattern,
-    bodyPart,
+    style,
     goal,
+    emphasis,
     soreAreas,
     fatiguedAreas,
     preferredExercises,
-  } = params;
-
-  const available = candidates.filter(
-    (exercise) =>
-      !usedIds.has(exercise.id) && !violatesRepeatRules(exercise, selected, rules)
-  );
-
-  if (available.length === 0) return null;
-
-  const scored = available.map((exercise) => ({
-    exercise,
-    score: getExerciseScore({
-      exercise,
-      rules,
-      desiredPattern,
-      selected,
-      bodyPart,
-      goal,
-      soreAreas,
-      fatiguedAreas,
-      preferredExercises,
-    }),
-  }));
-
-  scored.sort((a, b) => b.score - a.score);
-
-  const topScore = scored[0]?.score ?? 0;
-  const topTier = scored.filter((item) => item.score >= topScore - 2);
-  const choice = shuffleArray(topTier)[0];
-
-  return choice?.exercise ?? null;
-}
-
-function fillTemplateExercises(params: {
-  pool: Exercise[];
-  rules: WorkoutRules;
-  usedIds: Set<string>;
-  selected: Exercise[];
-  bodyPart: BodyPart;
-  goal: Goal;
-  soreAreas: string[];
-  fatiguedAreas: string[];
-  preferredExercises: string[];
-}): void {
-  const {
-    pool,
-    rules,
+    recentExerciseIds,
     usedIds,
-    selected,
-    bodyPart,
-    goal,
-    soreAreas,
-    fatiguedAreas,
-    preferredExercises,
+    allowSameMovement = false,
   } = params;
 
-  for (const pattern of rules.template) {
-    const exactCandidates = pool.filter((exercise) => exercise.movementPattern === pattern);
+  const usedPatterns = selected.map((exercise) => exercise.movementPattern);
 
-    let chosen = pickBestExercise({
-      candidates: exactCandidates,
-      rules,
-      selected,
-      usedIds,
-      desiredPattern: pattern,
-      bodyPart,
-      goal,
-      soreAreas,
-      fatiguedAreas,
-      preferredExercises,
-    });
-
-    if (!chosen) {
-      const fallbackCandidates = pool.filter(
-        (exercise) =>
-          rules.allowedPatterns.includes(exercise.movementPattern) ||
-          rules.targetMuscles.includes(exercise.primaryMuscle) ||
-          exercise.secondaryMuscles.some((muscle) => rules.targetMuscles.includes(muscle))
-      );
-
-      chosen = pickBestExercise({
-        candidates: fallbackCandidates,
-        rules,
-        selected,
-        usedIds,
-        desiredPattern: pattern,
-        bodyPart,
-        goal,
-        soreAreas,
-        fatiguedAreas,
-        preferredExercises,
-      });
-    }
-
-    if (chosen) {
-      selected.push(chosen);
-      usedIds.add(chosen.id);
-    }
-  }
-}
-
-function getFillCandidates(
-  pool: Exercise[],
-  rules: WorkoutRules,
-  selected: Exercise[],
-  usedIds: Set<string>,
-  goal: Goal,
-  fillPriorityPatterns?: MovementPattern[]
-): Exercise[] {
-  const priorities = fillPriorityPatterns ?? [];
-
-  return pool.filter((exercise) => {
+  const available = candidates.filter((exercise) => {
     if (usedIds.has(exercise.id)) return false;
-    if (violatesRepeatRules(exercise, selected, rules)) return false;
-
-    const targetsPrimary = rules.targetMuscles.includes(exercise.primaryMuscle);
-    const targetsSecondary = exercise.secondaryMuscles.some((muscle) =>
-      rules.targetMuscles.includes(muscle)
-    );
-    const hasPreferredTag = exercise.workoutTags.some((tag) =>
-      rules.preferredTags.includes(tag)
-    );
-    const allowedPattern = rules.allowedPatterns.includes(exercise.movementPattern);
-
-    if (!(targetsPrimary || targetsSecondary || hasPreferredTag || allowedPattern)) {
-      return false;
-    }
-
-    if (goal === "strength" && exercise.category === "isolation") {
-      const currentIsolationCount = selected.filter((item) => item.category === "isolation").length;
-      if (currentIsolationCount >= 1) return false;
-    }
-
-    if (priorities.length > 0 && selected.length >= 3) {
-      return priorities.includes(exercise.movementPattern);
-    }
-
+    if (!allowSameMovement && usedPatterns.includes(exercise.movementPattern)) return false;
     return true;
   });
-}
 
-function enforceCoverage(
-  selected: Exercise[],
-  pool: Exercise[],
-  usedIds: Set<string>,
-  rules: WorkoutRules,
-  bodyPart: BodyPart,
-  goal: Goal,
-  soreAreas: string[],
-  fatiguedAreas: string[],
-  preferredExercises: string[]
-): void {
-  const tryAddPattern = (pattern: MovementPattern) => {
-    if (hasPattern(selected, pattern)) return;
+  const pool = available.length ? available : candidates.filter((exercise) => !usedIds.has(exercise.id));
+  if (!pool.length) return null;
 
-    const candidates = pool.filter((exercise) => exercise.movementPattern === pattern);
-    const chosen = pickBestExercise({
-      candidates,
-      rules,
-      selected,
-      usedIds,
-      desiredPattern: pattern,
-      bodyPart,
-      goal,
-      soreAreas,
-      fatiguedAreas,
-      preferredExercises,
-    });
+  const scored = pool.map((exercise) => {
+    let score = 0;
+    score += scoreExerciseForStyle(exercise, style);
+    score += scoreExerciseForGoal(exercise, goal);
+    score += scoreExerciseForEmphasis(exercise, emphasis);
+    score += scoreExerciseForRecovery(exercise, soreAreas, fatiguedAreas);
+    score += scoreExerciseForPreference(exercise, preferredExercises, recentExerciseIds);
 
-    if (chosen) {
-      selected.push(chosen);
-      usedIds.add(chosen.id);
-    }
-  };
-
-  const tryAddPrimary = (primary: Muscle) => {
-    if (hasPrimary(selected, primary)) return;
-
-    const candidates = pool.filter((exercise) => exercise.primaryMuscle === primary);
-    const chosen = pickBestExercise({
-      candidates,
-      rules,
-      selected,
-      usedIds,
-      bodyPart,
-      goal,
-      soreAreas,
-      fatiguedAreas,
-      preferredExercises,
-    });
-
-    if (chosen) {
-      selected.push(chosen);
-      usedIds.add(chosen.id);
-    }
-  };
-
-  if (bodyPart === "legs") {
-    tryAddPattern("squat");
-    tryAddPattern("hinge");
-  }
-
-  if (bodyPart === "push") {
-    tryAddPattern("horizontal_press");
-    tryAddPattern("vertical_press");
-  }
-
-  if (bodyPart === "pull" || bodyPart === "back") {
-    tryAddPattern("vertical_pull");
-    tryAddPattern("horizontal_pull");
-  }
-
-  if (bodyPart === "arms") {
-    tryAddPattern("curl");
-    tryAddPattern("tricep_extension");
-  }
-
-  if (bodyPart === "shoulders") {
-    tryAddPattern("vertical_press");
-    tryAddPattern("raise");
-  }
-
-  if (bodyPart === "full_body") {
-    tryAddPattern("squat");
-    tryAddPattern("horizontal_press");
-    tryAddPattern("horizontal_pull");
-  }
-
-  if (bodyPart === "chest") {
-    tryAddPrimary("chest");
-  }
-}
-
-function trimToTargetCount(
-  selected: Exercise[],
-  targetCount: number,
-  bodyPart: BodyPart
-): Exercise[] {
-  if (selected.length <= targetCount) return selected;
-
-  const protectedPatterns: Partial<Record<BodyPart, MovementPattern[]>> = {
-    chest: ["horizontal_press", "fly"],
-    back: ["vertical_pull", "horizontal_pull"],
-    legs: ["squat", "hinge", "lunge"],
-    shoulders: ["vertical_press", "raise"],
-    arms: ["curl", "tricep_extension"],
-    push: ["horizontal_press", "vertical_press", "tricep_extension"],
-    pull: ["vertical_pull", "horizontal_pull", "curl"],
-    full_body: ["squat", "hinge", "horizontal_press", "horizontal_pull"],
-  };
-
-  const protectedSet = new Set(protectedPatterns[bodyPart] ?? []);
-
-  const sortedForTrim = [...selected].sort((a, b) => {
-    const aProtected = protectedSet.has(a.movementPattern) ? 1 : 0;
-    const bProtected = protectedSet.has(b.movementPattern) ? 1 : 0;
-
-    if (aProtected !== bProtected) return aProtected - bProtected;
-
-    if (categoryPriority[a.category] !== categoryPriority[b.category]) {
-      return categoryPriority[b.category] - categoryPriority[a.category];
+    if (exercise.category === "main" && selected.filter((item) => item.category === "main").length >= 2) {
+      score -= 3;
     }
 
-    return (
-      (movementPatternPriority[b.movementPattern] ?? 999) -
-      (movementPatternPriority[a.movementPattern] ?? 999)
-    );
+    return { exercise, score };
   });
 
-  while (sortedForTrim.length > targetCount) {
-    sortedForTrim.shift();
-  }
-
-  return selected.filter((exercise) => sortedForTrim.some((item) => item.id === exercise.id));
+  scored.sort((a, b) => b.score - a.score);
+  const topScore = scored[0]?.score ?? 0;
+  const topPool = scored.filter((item) => item.score >= topScore - 2).map((item) => item.exercise);
+  return sampleOne(topPool);
 }
 
-function fillRemainingExercises(params: {
-  pool: Exercise[];
-  rules: WorkoutRules;
-  selected: Exercise[];
-  usedIds: Set<string>;
-  targetCount: number;
-  bodyPart: BodyPart;
-  goal: Goal;
-  soreAreas: string[];
-  fatiguedAreas: string[];
-  preferredExercises: string[];
-}): void {
-  const {
-    pool,
-    rules,
-    selected,
-    usedIds,
-    targetCount,
-    bodyPart,
-    goal,
-    soreAreas,
-    fatiguedAreas,
-    preferredExercises,
-  } = params;
-
-  while (selected.length < targetCount) {
-    const candidates = getFillCandidates(
-      pool,
-      rules,
-      selected,
-      usedIds,
-      goal,
-      rules.fillPriorityPatterns
-    );
-
-    const chosen = pickBestExercise({
-      candidates,
-      rules,
-      selected,
-      usedIds,
-      bodyPart,
-      goal,
-      soreAreas,
-      fatiguedAreas,
-      preferredExercises,
-    });
-
-    if (!chosen) break;
-
-    selected.push(chosen);
-    usedIds.add(chosen.id);
-  }
-}
-
-function sortExercisesForWorkout(exercises: Exercise[]): Exercise[] {
-  return [...exercises].sort((a, b) => {
-    const categoryDiff = categoryPriority[a.category] - categoryPriority[b.category];
-    if (categoryDiff !== 0) return categoryDiff;
-
-    const movementDiff =
-      (movementPatternPriority[a.movementPattern] ?? 999) -
-      (movementPatternPriority[b.movementPattern] ?? 999);
-
-    if (movementDiff !== 0) return movementDiff;
-
-    return a.name.localeCompare(b.name);
-  });
+function attachFinisherNotes(style: WorkoutStyle) {
+  if (style === "bodybuilding") return "Final set can be taken very close to failure.";
+  if (style === "high_volume") return "Final isolation movement can use a dropset if recovery is good.";
+  if (style === "intensity") return "Final set can use rest-pause if form stays clean.";
+  if (style === "pump") return "Short rests and a hard final squeeze are encouraged.";
+  if (style === "old_school_mass") return "Push the final hard set with controlled aggression.";
+  return null;
 }
 
 export function generateWorkout({
@@ -1227,96 +1062,120 @@ export function generateWorkout({
   fatiguedAreas = [],
   preferredExercises = [],
   excludedExercises = [],
+  style = "bodybuilding",
+  volumeTier = "high",
+  emphasis = "",
+  recentExerciseIds = [],
 }: GenerateWorkoutInput): GeneratedWorkout {
-  const rules = getWorkoutRules(bodyPart);
-  const exerciseCount = getExerciseCount(duration, experienceLevel);
-  const setAdjustment = getSetAdjustment(experienceLevel, goal);
-  const scheme = repSchemes[goal];
-
   const normalizedSoreAreas = normalizeList(soreAreas);
   const normalizedFatiguedAreas = normalizeList(fatiguedAreas);
   const normalizedPreferredExercises = normalizeList(preferredExercises);
   const normalizedExcludedExercises = normalizeList(excludedExercises);
+  const normalizedRecentExerciseIds = normalizeList(recentExerciseIds);
 
-  const pool = exerciseLibrary
+  const pool = getPoolForBodyPart(bodyPart)
     .filter((exercise) => isExerciseValidForUser(exercise, equipmentAccess, experienceLevel))
     .filter((exercise) => !normalizedExcludedExercises.includes(exercise.id.toLowerCase()));
 
-  const selected: Exercise[] = [];
+  const template = getTemplate(bodyPart, volumeTier, emphasis);
+  const selected: Array<{ exercise: Exercise; slot: TemplateSlot; setCount: number }> = [];
   const usedIds = new Set<string>();
 
-  fillTemplateExercises({
-    pool,
-    rules,
-    usedIds,
-    selected,
-    bodyPart,
-    goal,
-    soreAreas: normalizedSoreAreas,
-    fatiguedAreas: normalizedFatiguedAreas,
-    preferredExercises: normalizedPreferredExercises,
+  template.forEach((slotDef) => {
+    const selector = buildSlotSelector(slotDef.slot, bodyPart, emphasis);
+    const candidates = pool.filter(selector);
+
+    const allowSameMovement =
+      ["side_delt", "rear_delt", "biceps_secondary", "triceps_secondary", "finisher"].includes(
+        slotDef.slot
+      );
+
+    const chosen = pickBestExercise({
+      candidates,
+      selected: selected.map((item) => item.exercise),
+      style,
+      goal,
+      emphasis,
+      soreAreas: normalizedSoreAreas,
+      fatiguedAreas: normalizedFatiguedAreas,
+      preferredExercises: normalizedPreferredExercises,
+      recentExerciseIds: normalizedRecentExerciseIds,
+      usedIds,
+      allowSameMovement,
+    });
+
+    if (!chosen) return;
+
+    selected.push({
+      exercise: chosen,
+      slot: slotDef.slot,
+      setCount: slotDef.sets,
+    });
+    usedIds.add(chosen.id);
   });
 
-  enforceCoverage(
-    selected,
-    pool,
-    usedIds,
-    rules,
-    bodyPart,
-    goal,
-    normalizedSoreAreas,
-    normalizedFatiguedAreas,
-    normalizedPreferredExercises
-  );
+  if (selected.length < 4) {
+    const fallback = shuffleArray(pool)
+      .filter((exercise) => !usedIds.has(exercise.id))
+      .slice(0, 3);
 
-  fillRemainingExercises({
-    pool,
-    rules,
-    selected,
-    usedIds,
-    targetCount: exerciseCount,
-    bodyPart,
-    goal,
-    soreAreas: normalizedSoreAreas,
-    fatiguedAreas: normalizedFatiguedAreas,
-    preferredExercises: normalizedPreferredExercises,
-  });
+    fallback.forEach((exercise) => {
+      selected.push({
+        exercise,
+        slot: "finisher",
+        setCount: Math.min(3, Math.max(2, exercise.category === "main" ? 3 : 2)),
+      });
+      usedIds.add(exercise.id);
+    });
+  }
 
-  const trimmedSelected = trimToTargetCount(selected, exerciseCount, bodyPart);
-  const orderedExercises = sortExercisesForWorkout(trimmedSelected);
-
-  const generatedExercises: GeneratedExercise[] = orderedExercises.map((exercise) => {
-    const template = scheme[exercise.category];
-    const totalSets =
-      exercise.category === "main" ? template.sets + setAdjustment : template.sets;
+  const exercises: GeneratedExercise[] = selected.map((item, index) => {
+    const repRange = pickRepRange(goal, style, item.exercise);
+    const note =
+      item.slot === "finisher" && index === selected.length - 1
+        ? attachFinisherNotes(style)
+        : null;
 
     return {
-      id: exercise.id,
-      exercise_name: exercise.name,
-      body_part: getDisplayBodyPart(exercise, bodyPart),
-      sets: buildSets(totalSets, getGoalAdjustedReps(goal, exercise, template.reps)),
-      coachingNote: buildExerciseCoachingNote(exercise, goal),
-      reason: buildExerciseReason(exercise, bodyPart, goal),
-      restSeconds: getRestSeconds(goal, exercise),
-      targetWeight: getTargetWeightHint(exercise),
+      id: item.exercise.id,
+      exercise_name: item.exercise.name,
+      body_part: getDisplayBodyPart(item.exercise, bodyPart),
+      sets: buildSets(item.setCount, repRange),
+      coachingNote: buildExerciseCoachingNote(item.exercise, goal, style, item.slot),
+      reason: buildExerciseReason(item.exercise, bodyPart, item.slot, emphasis),
+      restSeconds: getRestSeconds(goal, style, item.exercise),
+      targetWeight: null,
+      repRange,
+      category: item.exercise.category,
+      notes: note,
     };
   });
 
+  const totalWorkingSets = exercises.reduce((sum, exercise) => sum + exercise.sets.length, 0);
+  const estimatedDuration = getEstimatedDurationFromSets(totalWorkingSets, style, duration);
+
   return {
-    workout_name: getWorkoutTitle(bodyPart, goal),
+    workout_name: getWorkoutTitle(bodyPart, style, volumeTier, emphasis),
     body_part: bodyPart,
-    estimated_duration: duration,
+    estimated_duration: estimatedDuration,
+    totalWorkingSets,
+    workoutStyle: STYLE_LABELS[style],
+    emphasis,
     coachNote: buildCoachNote({
       goal,
       bodyPart,
       experienceLevel,
-      duration,
+      duration: estimatedDuration,
       equipmentAccess,
       soreAreas: normalizedSoreAreas,
       fatiguedAreas: normalizedFatiguedAreas,
+      style,
+      volumeTier,
+      emphasis,
+      totalWorkingSets,
     }),
-    intensityLabel: getIntensityLabel(duration, goal),
-    progressionAdvice: buildProgressionAdvice(goal, orderedExercises),
-    exercises: generatedExercises,
+    intensityLabel: getIntensityLabel(estimatedDuration, goal, volumeTier),
+    progressionAdvice: buildProgressionAdvice(goal, style, bodyPart, totalWorkingSets),
+    exercises,
   };
 }
