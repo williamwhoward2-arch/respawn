@@ -1,24 +1,30 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    if (searchParams.get("created") === "true") {
+      setStatus("Account created successfully. Please sign in.");
+    }
+  }, [searchParams]);
+
   async function handleLogin(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
-    setStatus("");
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
       password,
     });
@@ -29,9 +35,27 @@ export default function LoginPage() {
       return;
     }
 
-    setStatus("Logged in successfully.");
-    router.push("/dashboard");
-    router.refresh();
+    const userId = data.user?.id;
+
+    if (!userId) {
+      setStatus("Logged in, but no user ID was found.");
+      setLoading(false);
+      return;
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (profileError) {
+      setStatus(profileError.message);
+      setLoading(false);
+      return;
+    }
+
+    router.push(profile ? "/dashboard" : "/Profile?onboarding=true");
   }
 
   return (

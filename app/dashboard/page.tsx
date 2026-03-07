@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
@@ -614,6 +615,22 @@ export default function DashboardPage() {
         </p>
       </section>
 
+      <section style={cardStyle}>
+        <div style={sectionHeaderStyle}>
+          <h2 style={sectionTitle}>Quick Actions</h2>
+        </div>
+
+        <div style={stackedButtonWrapStyle}>
+          <Link href="/Workout" style={largePrimaryNavButtonStyle}>
+            Start Workout
+          </Link>
+
+          <Link href="/Profile" style={largeSecondaryNavButtonStyle}>
+            Open Profile
+          </Link>
+        </div>
+      </section>
+
       <section style={twoColGridStyle}>
         <section style={cardStyle}>
           <div style={sectionHeaderStyle}>
@@ -781,9 +798,10 @@ const pageStyle: CSSProperties = {
   minHeight: "100vh",
   background: "linear-gradient(180deg, #050505 0%, #0a0a0a 35%, #0f0f0f 100%)",
   color: "white",
-  padding: "28px 20px 120px",
+  padding: "28px 20px 140px",
   fontFamily: "sans-serif",
 };
+
 const heroCardStyle: CSSProperties = {
   background: "linear-gradient(135deg, rgba(255,26,26,0.16) 0%, rgba(18,18,18,1) 55%, rgba(10,10,10,1) 100%)",
   border: "1px solid rgba(255,255,255,0.08)",
@@ -792,6 +810,7 @@ const heroCardStyle: CSSProperties = {
   marginBottom: "18px",
   boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
 };
+
 const eyebrowStyle: CSSProperties = {
   color: "#ff6b6b",
   fontSize: "12px",
@@ -799,6 +818,7 @@ const eyebrowStyle: CSSProperties = {
   letterSpacing: "0.14em",
   margin: "0 0 10px",
 };
+
 const heroTitleStyle: CSSProperties = {
   color: "#ffffff",
   fontSize: "30px",
@@ -806,11 +826,13 @@ const heroTitleStyle: CSSProperties = {
   fontWeight: 800,
   margin: "0 0 8px",
 };
+
 const heroSubStyle: CSSProperties = {
   color: "#d0d0d0",
   fontSize: "15px",
   margin: 0,
 };
+
 const accountBarStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
@@ -820,26 +842,31 @@ const accountBarStyle: CSSProperties = {
   marginBottom: "8px",
   flexWrap: "wrap",
 };
+
 const accountInfoStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: "4px",
 };
+
 const accountLabelStyle: CSSProperties = {
   color: "#a9a9a9",
   fontSize: "12px",
 };
+
 const accountValueStyle: CSSProperties = {
   color: "#ffffff",
   fontWeight: 700,
   fontSize: "14px",
 };
+
 const heroStatsRowStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
   gap: "10px",
   marginTop: "20px",
 };
+
 const heroStatBoxStyle: CSSProperties = {
   background: "rgba(255,255,255,0.04)",
   border: "1px solid rgba(255,255,255,0.06)",
@@ -849,25 +876,30 @@ const heroStatBoxStyle: CSSProperties = {
   flexDirection: "column",
   gap: "6px",
 };
+
 const heroStatLabelStyle: CSSProperties = {
   color: "#aaaaaa",
   fontSize: "12px",
 };
+
 const heroStatValueStyle: CSSProperties = {
   color: "#ffffff",
   fontSize: "24px",
   fontWeight: 900,
 };
+
 const heroInsightStyle: CSSProperties = {
   color: "#efefef",
   fontSize: "14px",
   margin: "18px 0 0",
   fontWeight: 600,
 };
+
 const heroInsightValueStyle: CSSProperties = {
   color: "#ffffff",
   fontWeight: 900,
 };
+
 const cardStyle: CSSProperties = {
   background: "#121212",
   border: "1px solid #222",
@@ -876,6 +908,7 @@ const cardStyle: CSSProperties = {
   boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
   marginBottom: "16px",
 };
+
 const sectionHeaderStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
@@ -883,23 +916,59 @@ const sectionHeaderStyle: CSSProperties = {
   gap: "12px",
   marginBottom: "12px",
 };
+
 const sectionTitle: CSSProperties = {
   color: "#ff4d4d",
   margin: 0,
   fontSize: "18px",
   fontWeight: 800,
 };
+
+const stackedButtonWrapStyle: CSSProperties = {
+  display: "grid",
+  gap: "12px",
+};
+
+const largePrimaryNavButtonStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: "64px",
+  backgroundColor: "#ff1a1a",
+  borderRadius: "14px",
+  color: "white",
+  textDecoration: "none",
+  fontWeight: 800,
+  fontSize: "16px",
+};
+
+const largeSecondaryNavButtonStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: "64px",
+  backgroundColor: "#1c1c1c",
+  border: "1px solid #333",
+  borderRadius: "14px",
+  color: "white",
+  textDecoration: "none",
+  fontWeight: 800,
+  fontSize: "16px",
+};
+
 const twoColGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
   gap: "16px",
 };
+
 const miniStatGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
   gap: "10px",
   marginBottom: "18px",
 };
+
 const miniStatBoxStyle: CSSProperties = {
   background: "#171717",
   border: "1px solid #252525",
@@ -909,32 +978,38 @@ const miniStatBoxStyle: CSSProperties = {
   flexDirection: "column",
   gap: "6px",
 };
+
 const miniStatLabelStyle: CSSProperties = {
   color: "#a9a9a9",
   fontSize: "12px",
 };
+
 const miniStatValueStyle: CSSProperties = {
   color: "#fff",
   fontWeight: 900,
   fontSize: "18px",
 };
+
 const miniStatValueStyleSmall: CSSProperties = {
   color: "#fff",
   fontWeight: 800,
   fontSize: "14px",
   lineHeight: 1.35,
 };
+
 const heatmapGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(14, minmax(0, 1fr))",
   gap: "8px",
 };
+
 const heatmapDayWrapStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   alignItems: "center",
   gap: "6px",
 };
+
 const heatmapCellStyle: CSSProperties = {
   width: "100%",
   aspectRatio: "1 / 1",
@@ -942,21 +1017,25 @@ const heatmapCellStyle: CSSProperties = {
   borderRadius: "8px",
   border: "1px solid rgba(255,255,255,0.06)",
 };
+
 const heatmapLabelStyle: CSSProperties = {
   color: "#7f7f7f",
   fontSize: "10px",
 };
+
 const personalizedLiftGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
   gap: "12px",
 };
+
 const personalizedLiftCardStyle: CSSProperties = {
   background: "linear-gradient(135deg, rgba(255,26,26,0.08), rgba(255,255,255,0.02))",
   border: "1px solid rgba(255,255,255,0.06)",
   borderRadius: "16px",
   padding: "16px",
 };
+
 const personalizedLiftTopRowStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
@@ -964,83 +1043,99 @@ const personalizedLiftTopRowStyle: CSSProperties = {
   gap: "10px",
   marginBottom: "10px",
 };
+
 const personalizedLiftNameStyle: CSSProperties = {
   color: "#fff",
   fontSize: "16px",
   fontWeight: 800,
 };
+
 const personalizedLiftBodyPartStyle: CSSProperties = {
   color: "#a8a8a8",
   fontSize: "12px",
   marginTop: "4px",
 };
+
 const personalizedLiftCountStyle: CSSProperties = {
   color: "#ff8b8b",
   fontSize: "12px",
   fontWeight: 800,
   whiteSpace: "nowrap",
 };
+
 const personalizedLiftBestStyle: CSSProperties = {
   color: "#fff",
   fontSize: "20px",
   fontWeight: 900,
   marginBottom: "8px",
 };
+
 const personalizedLiftSubStyle: CSSProperties = {
   color: "#c7c7c7",
   fontSize: "13px",
   marginTop: "6px",
 };
+
 const bodyPartGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
   gap: "10px",
 };
+
 const bodyPartCardStyle: CSSProperties = {
   background: "#171717",
   border: "1px solid #252525",
   borderRadius: "16px",
   padding: "14px",
 };
+
 const bodyPartNameStyle: CSSProperties = {
   color: "#fff",
   fontWeight: 800,
   fontSize: "15px",
 };
+
 const bodyPartSubStyle: CSSProperties = {
   color: "#b8b8b8",
   fontSize: "13px",
   marginTop: "6px",
 };
+
 const feedListStyle: CSSProperties = {
   display: "grid",
   gap: "12px",
 };
+
 const feedCardStyle: CSSProperties = {
   background: "#171717",
   border: "1px solid #252525",
   borderRadius: "16px",
   padding: "14px",
 };
+
 const feedTitleStyle: CSSProperties = {
   color: "#fff",
   fontWeight: 800,
   fontSize: "15px",
 };
+
 const feedDetailStyle: CSSProperties = {
   color: "#bbbbbb",
   fontSize: "13px",
   marginTop: "6px",
 };
+
 const cardFootnoteStyle: CSSProperties = {
   color: "#8d8d8d",
   fontSize: "12px",
   marginTop: "14px",
 };
+
 const mutedStyle: CSSProperties = {
   color: "#a5a5a5",
   margin: "6px 0",
 };
+
 const secondaryButtonStyle: CSSProperties = {
   backgroundColor: "#222",
   border: "1px solid #333",
@@ -1051,6 +1146,7 @@ const secondaryButtonStyle: CSSProperties = {
   fontSize: "14px",
   cursor: "pointer",
 };
+
 const statusStyle: CSSProperties = {
   marginTop: "18px",
   marginBottom: "18px",

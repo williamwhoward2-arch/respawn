@@ -200,8 +200,15 @@ export default function WorkoutPage() {
     } = await supabase.auth.getUser();
 
     if (error) {
+      const message = error.message || "";
+      if (message.includes("Invalid Refresh Token")) {
+        await supabase.auth.signOut();
+        router.replace("/login");
+        return;
+      }
+
       console.error("Get user error:", error);
-      setStatus(`Error loading account: ${error.message}`);
+      setStatus(`Error loading account: ${message}`);
       setAuthLoading(false);
       return;
     }
@@ -409,13 +416,41 @@ export default function WorkoutPage() {
     setExercises((prev) => {
       const updated = [...prev];
       const exercise = { ...updated[exerciseIndex] };
-      const previousSet = exercise.sets[exercise.sets.length - 1];
+
+      let copiedWeight = "";
+      let copiedReps = "";
+
+      for (let i = exercise.sets.length - 1; i >= 0; i -= 1) {
+        const set = exercise.sets[i];
+        const hasWeight = String(set.weight).trim() !== "";
+        const hasReps = String(set.reps).trim() !== "";
+
+        if (set.completed && (hasWeight || hasReps)) {
+          copiedWeight = set.weight ?? "";
+          copiedReps = set.reps ?? "";
+          break;
+        }
+      }
+
+      if (!copiedWeight && !copiedReps) {
+        for (let i = exercise.sets.length - 1; i >= 0; i -= 1) {
+          const set = exercise.sets[i];
+          const hasWeight = String(set.weight).trim() !== "";
+          const hasReps = String(set.reps).trim() !== "";
+
+          if (hasWeight || hasReps) {
+            copiedWeight = set.weight ?? "";
+            copiedReps = set.reps ?? "";
+            break;
+          }
+        }
+      }
 
       exercise.sets = [
         ...exercise.sets,
         {
-          weight: previousSet?.weight ?? "",
-          reps: previousSet?.reps ?? "",
+          weight: copiedWeight,
+          reps: copiedReps,
           completed: false,
         },
       ];
@@ -424,7 +459,7 @@ export default function WorkoutPage() {
       return updated;
     });
 
-    setStatus("Set added and copied from previous set.");
+    setStatus("Set added and copied from your previous set.");
   }
 
   function removeSet(exerciseIndex: number, setIndex: number) {
@@ -732,6 +767,22 @@ export default function WorkoutPage() {
         </section>
 
         <section style={cardStyle}>
+          <div style={sectionHeaderStyle}>
+            <h2 style={sectionTitle}>Go To</h2>
+          </div>
+
+          <div style={stackedButtonWrapStyle}>
+            <Link href="/dashboard" style={largePrimaryNavButtonStyle}>
+              Back to Dashboard
+            </Link>
+
+            <Link href="/Profile" style={largeSecondaryNavButtonStyle}>
+              Open Profile
+            </Link>
+          </div>
+        </section>
+
+        <section style={cardStyle}>
           {exercises.map((exercise) => {
             const completedExerciseSets = exercise.sets.filter(
               (set) =>
@@ -751,7 +802,9 @@ export default function WorkoutPage() {
                   completedExerciseSets.map((set, index) => (
                     <div key={index} style={setRowStyle}>
                       <span>Set {index + 1}</span>
-                      <span>{set.weight} lbs × {set.reps}</span>
+                      <span>
+                        {set.weight} lbs × {set.reps}
+                      </span>
                     </div>
                   ))
                 )}
@@ -759,15 +812,6 @@ export default function WorkoutPage() {
             );
           })}
         </section>
-
-        <div style={{ display: "flex", gap: 12, marginTop: 20, flexWrap: "wrap" }}>
-          <Link href="/dashboard" style={navButtonPrimary}>
-            Back to Dashboard
-          </Link>
-          <Link href="/Today" style={navButtonSecondary}>
-            Back to Today
-          </Link>
-        </div>
       </main>
     );
   }
@@ -810,15 +854,37 @@ export default function WorkoutPage() {
 
       <section style={cardStyle}>
         <div style={sectionHeaderStyle}>
+          <h2 style={sectionTitle}>Go To</h2>
+        </div>
+
+        <div style={stackedButtonWrapStyle}>
+          <Link href="/dashboard" style={largeSecondaryNavButtonStyle}>
+            Back to Dashboard
+          </Link>
+
+          <Link href="/Profile" style={largeSecondaryNavButtonStyle}>
+            Open Profile
+          </Link>
+        </div>
+      </section>
+
+      <section style={cardStyle}>
+        <div style={sectionHeaderStyle}>
           <h2 style={sectionTitle}>Workout Timer</h2>
         </div>
 
         <div style={timerDisplayStyle}>{formatTime(secondsElapsed)}</div>
 
         <div style={buttonRowStyle}>
-          <button onClick={startTimer} style={primaryButtonStyle}>Start</button>
-          <button onClick={stopTimer} style={secondaryButtonStyle}>Stop</button>
-          <button onClick={resetTimer} style={dangerButtonStyle}>Reset</button>
+          <button onClick={startTimer} style={primaryButtonStyle}>
+            Start
+          </button>
+          <button onClick={stopTimer} style={secondaryButtonStyle}>
+            Stop
+          </button>
+          <button onClick={resetTimer} style={dangerButtonStyle}>
+            Reset
+          </button>
         </div>
       </section>
 
@@ -828,7 +894,11 @@ export default function WorkoutPage() {
         </div>
 
         <div style={inputGridStyle}>
-          <select value={libraryChoice} onChange={(e) => setLibraryChoice(e.target.value)} style={selectStyle}>
+          <select
+            value={libraryChoice}
+            onChange={(e) => setLibraryChoice(e.target.value)}
+            style={selectStyle}
+          >
             <option value="">Choose from library</option>
             {allExerciseLibrary.map((exercise) => (
               <option key={exercise.name} value={exercise.name}>
@@ -845,14 +915,22 @@ export default function WorkoutPage() {
             style={inputStyle}
           />
 
-          <select value={newBodyPart} onChange={(e) => setNewBodyPart(e.target.value)} style={selectStyle}>
+          <select
+            value={newBodyPart}
+            onChange={(e) => setNewBodyPart(e.target.value)}
+            style={selectStyle}
+          >
             <option value="">Select body part</option>
             {BODY_PARTS.map((part) => (
-              <option key={part} value={part}>{part}</option>
+              <option key={part} value={part}>
+                {part}
+              </option>
             ))}
           </select>
 
-          <button onClick={addExercise} style={primaryButtonStyle}>Add Exercise</button>
+          <button onClick={addExercise} style={primaryButtonStyle}>
+            Add Exercise
+          </button>
         </div>
 
         <p style={helperTextStyle}>
@@ -864,7 +942,11 @@ export default function WorkoutPage() {
             <p style={subtleLabelStyle}>Favorites</p>
             <div style={chipWrapStyle}>
               {favoriteExercises.map((name) => (
-                <button key={name} onClick={() => addRecentExercise(name)} style={chipButtonStyle}>
+                <button
+                  key={name}
+                  onClick={() => addRecentExercise(name)}
+                  style={chipButtonStyle}
+                >
                   {name}
                 </button>
               ))}
@@ -877,7 +959,11 @@ export default function WorkoutPage() {
             <p style={subtleLabelStyle}>Recent</p>
             <div style={chipWrapStyle}>
               {recentExercises.map((name) => (
-                <button key={name} onClick={() => addRecentExercise(name)} style={chipButtonStyle}>
+                <button
+                  key={name}
+                  onClick={() => addRecentExercise(name)}
+                  style={chipButtonStyle}
+                >
                   {name}
                 </button>
               ))}
@@ -890,7 +976,8 @@ export default function WorkoutPage() {
         <section style={emptyStateCardStyle}>
           <h2 style={emptyStateTitleStyle}>No exercises added yet</h2>
           <p style={emptyStateTextStyle}>
-            Start by adding an exercise above. Then log weight, reps, and confirm each completed set.
+            Start by adding an exercise above. Then log weight, reps, and confirm each
+            completed set.
           </p>
         </section>
       ) : (
@@ -909,13 +996,22 @@ export default function WorkoutPage() {
               </div>
 
               <div style={buttonRowStyle}>
-                <button onClick={() => toggleFavorite(exercise.name)} style={secondaryButtonStyle}>
+                <button
+                  onClick={() => toggleFavorite(exercise.name)}
+                  style={secondaryButtonStyle}
+                >
                   {favoriteExercises.includes(exercise.name) ? "Unfavorite" : "Favorite"}
                 </button>
-                <button onClick={() => resetExerciseSets(index)} style={secondaryButtonStyle}>
+                <button
+                  onClick={() => resetExerciseSets(index)}
+                  style={secondaryButtonStyle}
+                >
                   Reset Sets
                 </button>
-                <button onClick={() => removeExercise(index)} style={dangerButtonStyle}>
+                <button
+                  onClick={() => removeExercise(index)}
+                  style={dangerButtonStyle}
+                >
                   Remove
                 </button>
               </div>
@@ -931,7 +1027,9 @@ export default function WorkoutPage() {
                   <input
                     placeholder="Weight"
                     value={set.weight}
-                    onChange={(e) => updateSetField(index, setIndex, "weight", e.target.value)}
+                    onChange={(e) =>
+                      updateSetField(index, setIndex, "weight", e.target.value)
+                    }
                     style={smallInputStyle}
                     inputMode="decimal"
                   />
@@ -939,7 +1037,9 @@ export default function WorkoutPage() {
                   <input
                     placeholder="Reps"
                     value={set.reps}
-                    onChange={(e) => updateSetField(index, setIndex, "reps", e.target.value)}
+                    onChange={(e) =>
+                      updateSetField(index, setIndex, "reps", e.target.value)
+                    }
                     style={smallInputStyle}
                     inputMode="numeric"
                   />
@@ -951,7 +1051,10 @@ export default function WorkoutPage() {
                     {set.completed ? "Completed" : "Complete Set"}
                   </button>
 
-                  <button onClick={() => removeSet(index, setIndex)} style={dangerButtonStyle}>
+                  <button
+                    onClick={() => removeSet(index, setIndex)}
+                    style={dangerButtonStyle}
+                  >
                     Remove Set
                   </button>
                 </div>
@@ -980,17 +1083,20 @@ const pageStyle: CSSProperties = {
   minHeight: "100vh",
   background: "linear-gradient(180deg, #050505 0%, #0a0a0a 35%, #0f0f0f 100%)",
   color: "white",
-  padding: "28px 20px 120px",
+  padding: "28px 20px 140px",
   fontFamily: "sans-serif",
 };
+
 const heroCardStyle: CSSProperties = {
-  background: "linear-gradient(135deg, rgba(255,26,26,0.18) 0%, rgba(20,20,20,1) 55%, rgba(10,10,10,1) 100%)",
+  background:
+    "linear-gradient(135deg, rgba(255,26,26,0.18) 0%, rgba(20,20,20,1) 55%, rgba(10,10,10,1) 100%)",
   border: "1px solid rgba(255,255,255,0.08)",
   borderRadius: "24px",
   padding: "24px",
   marginBottom: "18px",
   boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
 };
+
 const eyebrowStyle: CSSProperties = {
   color: "#ff6b6b",
   fontSize: "12px",
@@ -998,6 +1104,7 @@ const eyebrowStyle: CSSProperties = {
   letterSpacing: "0.14em",
   margin: "0 0 10px",
 };
+
 const heroTitleStyle: CSSProperties = {
   color: "#ffffff",
   fontSize: "30px",
@@ -1005,11 +1112,13 @@ const heroTitleStyle: CSSProperties = {
   fontWeight: 800,
   margin: "0 0 8px",
 };
+
 const heroSubStyle: CSSProperties = {
   color: "#d0d0d0",
   fontSize: "15px",
   margin: 0,
 };
+
 const accountBarStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
@@ -1018,26 +1127,31 @@ const accountBarStyle: CSSProperties = {
   flexWrap: "wrap",
   marginTop: "18px",
 };
+
 const accountInfoStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: "4px",
 };
+
 const accountLabelStyle: CSSProperties = {
   color: "#aaa",
   fontSize: "12px",
 };
+
 const accountValueStyle: CSSProperties = {
   color: "#fff",
   fontSize: "14px",
   fontWeight: 700,
 };
+
 const heroStatsRow: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
   gap: "10px",
   marginTop: "20px",
 };
+
 const heroStatBox: CSSProperties = {
   background: "rgba(255,255,255,0.04)",
   border: "1px solid rgba(255,255,255,0.06)",
@@ -1046,16 +1160,19 @@ const heroStatBox: CSSProperties = {
   display: "flex",
   flexDirection: "column",
 };
+
 const heroStatLabel: CSSProperties = {
   color: "#aaaaaa",
   fontSize: "12px",
   marginBottom: "6px",
 };
+
 const heroStatValue: CSSProperties = {
   color: "#ffffff",
   fontSize: "18px",
   fontWeight: 800,
 };
+
 const cardStyle: CSSProperties = {
   background: "#121212",
   border: "1px solid #222",
@@ -1064,6 +1181,7 @@ const cardStyle: CSSProperties = {
   boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
   marginBottom: "16px",
 };
+
 const exerciseCardStyle: CSSProperties = {
   background: "#121212",
   border: "1px solid #222",
@@ -1072,6 +1190,7 @@ const exerciseCardStyle: CSSProperties = {
   boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
   marginBottom: "16px",
 };
+
 const emptyStateCardStyle: CSSProperties = {
   background: "#121212",
   border: "1px dashed #333",
@@ -1080,17 +1199,20 @@ const emptyStateCardStyle: CSSProperties = {
   textAlign: "center",
   marginBottom: "16px",
 };
+
 const emptyStateTitleStyle: CSSProperties = {
   color: "#ffffff",
   fontSize: "22px",
   fontWeight: 800,
   margin: "0 0 8px",
 };
+
 const emptyStateTextStyle: CSSProperties = {
   color: "#9d9d9d",
   fontSize: "15px",
   margin: 0,
 };
+
 const sectionHeaderStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
@@ -1098,12 +1220,46 @@ const sectionHeaderStyle: CSSProperties = {
   gap: "12px",
   marginBottom: "12px",
 };
+
 const sectionTitle: CSSProperties = {
   color: "#ff4d4d",
   margin: 0,
   fontSize: "18px",
   fontWeight: 800,
 };
+
+const stackedButtonWrapStyle: CSSProperties = {
+  display: "grid",
+  gap: "12px",
+};
+
+const largePrimaryNavButtonStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: "64px",
+  backgroundColor: "#ff1a1a",
+  borderRadius: "14px",
+  color: "white",
+  textDecoration: "none",
+  fontWeight: 800,
+  fontSize: "16px",
+};
+
+const largeSecondaryNavButtonStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: "64px",
+  backgroundColor: "#1c1c1c",
+  border: "1px solid #333",
+  borderRadius: "14px",
+  color: "white",
+  textDecoration: "none",
+  fontWeight: 800,
+  fontSize: "16px",
+};
+
 const timerDisplayStyle: CSSProperties = {
   fontSize: "36px",
   fontWeight: 900,
@@ -1112,12 +1268,14 @@ const timerDisplayStyle: CSSProperties = {
   marginBottom: "16px",
   letterSpacing: "0.04em",
 };
+
 const inputGridStyle: CSSProperties = {
   display: "flex",
   gap: "10px",
   flexWrap: "wrap",
   marginTop: "12px",
 };
+
 const inputStyle: CSSProperties = {
   padding: "10px",
   borderRadius: "10px",
@@ -1126,6 +1284,7 @@ const inputStyle: CSSProperties = {
   color: "white",
   minWidth: "140px",
 };
+
 const smallInputStyle: CSSProperties = {
   padding: "10px",
   borderRadius: "10px",
@@ -1134,6 +1293,7 @@ const smallInputStyle: CSSProperties = {
   color: "white",
   minWidth: "90px",
 };
+
 const selectStyle: CSSProperties = {
   padding: "10px",
   borderRadius: "10px",
@@ -1142,11 +1302,13 @@ const selectStyle: CSSProperties = {
   color: "white",
   minWidth: "180px",
 };
+
 const buttonRowStyle: CSSProperties = {
   display: "flex",
   gap: "8px",
   flexWrap: "wrap",
 };
+
 const primaryButtonStyle: CSSProperties = {
   backgroundColor: "#ff1a1a",
   border: "none",
@@ -1156,6 +1318,7 @@ const primaryButtonStyle: CSSProperties = {
   fontWeight: 700,
   cursor: "pointer",
 };
+
 const secondaryButtonStyle: CSSProperties = {
   backgroundColor: "#2a2a2a",
   border: "1px solid #3a3a3a",
@@ -1165,6 +1328,7 @@ const secondaryButtonStyle: CSSProperties = {
   fontWeight: 700,
   cursor: "pointer",
 };
+
 const dangerButtonStyle: CSSProperties = {
   backgroundColor: "#661111",
   border: "1px solid #772222",
@@ -1174,6 +1338,7 @@ const dangerButtonStyle: CSSProperties = {
   fontWeight: 700,
   cursor: "pointer",
 };
+
 const completeButtonStyle: CSSProperties = {
   backgroundColor: "#1f3b2d",
   border: "1px solid #2f5a43",
@@ -1183,6 +1348,7 @@ const completeButtonStyle: CSSProperties = {
   fontWeight: 700,
   cursor: "pointer",
 };
+
 const completeButtonActiveStyle: CSSProperties = {
   backgroundColor: "#28a745",
   border: "1px solid #34c759",
@@ -1192,22 +1358,7 @@ const completeButtonActiveStyle: CSSProperties = {
   fontWeight: 800,
   cursor: "pointer",
 };
-const navButtonPrimary: CSSProperties = {
-  backgroundColor: "#ff1a1a",
-  color: "white",
-  padding: "12px 18px",
-  borderRadius: "10px",
-  textDecoration: "none",
-  fontWeight: 700,
-};
-const navButtonSecondary: CSSProperties = {
-  backgroundColor: "#222",
-  color: "white",
-  padding: "12px 18px",
-  borderRadius: "10px",
-  textDecoration: "none",
-  fontWeight: 700,
-};
+
 const exerciseTopRowStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
@@ -1215,20 +1366,24 @@ const exerciseTopRowStyle: CSSProperties = {
   gap: "12px",
   flexWrap: "wrap",
 };
+
 const exerciseTitleStyle: CSSProperties = {
   color: "#ff4d4d",
   margin: "0 0 4px",
   fontSize: "22px",
   fontWeight: 800,
 };
+
 const exerciseBodyPartStyle: CSSProperties = {
   color: "#999",
   margin: 0,
 };
+
 const setsHeaderStyle: CSSProperties = {
   marginBottom: "10px",
   color: "#ffffff",
 };
+
 const editableSetRowStyle: CSSProperties = {
   marginTop: "10px",
   color: "#ddd",
@@ -1239,6 +1394,7 @@ const editableSetRowStyle: CSSProperties = {
   padding: "10px 0",
   borderBottom: "1px solid #222",
 };
+
 const setRowStyle: CSSProperties = {
   marginTop: "8px",
   color: "#ddd",
@@ -1250,16 +1406,19 @@ const setRowStyle: CSSProperties = {
   padding: "10px 0",
   borderBottom: "1px solid #222",
 };
+
 const setNumberStyle: CSSProperties = {
   minWidth: "60px",
   color: "#efefef",
   fontWeight: 700,
 };
+
 const chipWrapStyle: CSSProperties = {
   display: "flex",
   gap: "8px",
   flexWrap: "wrap",
 };
+
 const chipButtonStyle: CSSProperties = {
   backgroundColor: "#1d1d1d",
   border: "1px solid #333",
@@ -1268,24 +1427,29 @@ const chipButtonStyle: CSSProperties = {
   borderRadius: "999px",
   cursor: "pointer",
 };
+
 const subtleLabelStyle: CSSProperties = {
   color: "#a8a8a8",
   fontSize: "13px",
   marginBottom: "8px",
 };
+
 const mutedStyle: CSSProperties = {
   color: "#999",
 };
+
 const statusStyle: CSSProperties = {
   color: "#cccccc",
   marginBottom: "16px",
 };
+
 const helperTextStyle: CSSProperties = {
   color: "#8f8f8f",
   fontSize: "13px",
   marginTop: "12px",
   marginBottom: 0,
 };
+
 const finishButtonStyle: CSSProperties = {
   width: "100%",
   backgroundColor: "#ff1a1a",
@@ -1297,16 +1461,19 @@ const finishButtonStyle: CSSProperties = {
   fontSize: "16px",
   cursor: "pointer",
 };
+
 const listStyle: CSSProperties = {
   display: "grid",
   gap: "10px",
 };
+
 const listItemStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: "12px",
   color: "#efefef",
 };
+
 const listLineStyle: CSSProperties = {
   width: "10px",
   height: "2px",

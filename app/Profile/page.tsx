@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
@@ -44,6 +45,7 @@ export default function ProfilePage() {
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(true);
   const [resetting, setResetting] = useState(false);
+  const [savingAndLeaving, setSavingAndLeaving] = useState(false);
 
   useEffect(() => {
     void initializeProfilePage();
@@ -141,13 +143,21 @@ export default function ProfilePage() {
     setStatus("Form cleared. Your saved profile is still in Supabase until you save again.");
   }
 
-  async function saveProfile() {
+  async function saveProfile(options?: { redirectToDashboard?: boolean }) {
     if (!authUser?.id) {
       setStatus("You must be signed in to save your profile.");
-      return;
+      return false;
     }
 
-    setStatus(profileId ? "Updating your profile..." : "Saving your profile...");
+    const redirectToDashboard = options?.redirectToDashboard ?? false;
+
+    if (redirectToDashboard) {
+      setSavingAndLeaving(true);
+      setStatus(profileId ? "Updating profile and opening dashboard..." : "Saving profile and opening dashboard...");
+    } else {
+      setStatus(profileId ? "Updating your profile..." : "Saving your profile...");
+    }
+
     setSaved(false);
 
     const payload = {
@@ -175,14 +185,21 @@ export default function ProfilePage() {
       if (error) {
         console.error("Update profile error:", error);
         setStatus(`Error: ${error.message}`);
-        return;
+        setSavingAndLeaving(false);
+        return false;
       }
 
       const updated = data as ProfileRow;
       setProfileId(updated.id);
       setSaved(true);
       setStatus("Profile updated successfully.");
-      return;
+
+      if (redirectToDashboard) {
+        router.push("/dashboard");
+      }
+
+      setSavingAndLeaving(false);
+      return true;
     }
 
     const { data, error } = await supabase
@@ -194,13 +211,25 @@ export default function ProfilePage() {
     if (error) {
       console.error("Insert profile error:", error);
       setStatus(`Error: ${error.message}`);
-      return;
+      setSavingAndLeaving(false);
+      return false;
     }
 
     const inserted = data as ProfileRow;
     setProfileId(inserted.id);
     setSaved(true);
     setStatus("Profile saved successfully.");
+
+    if (redirectToDashboard) {
+      router.push("/dashboard");
+    }
+
+    setSavingAndLeaving(false);
+    return true;
+  }
+
+  async function handleSaveAndGoDashboard() {
+    await saveProfile({ redirectToDashboard: true });
   }
 
   async function handleResetAccount() {
@@ -338,13 +367,34 @@ export default function ProfilePage() {
 
       <section style={cardStyle}>
         <div style={sectionHeaderStyle}>
+          <h2 style={sectionTitle}>Go To</h2>
+        </div>
+
+        <div style={stackedButtonWrapStyle}>
+          <Link href="/dashboard" style={largeSecondaryNavButtonStyle}>
+            Open Dashboard
+          </Link>
+
+          <Link href="/Workout" style={largePrimaryNavButtonStyle}>
+            Start Workout
+          </Link>
+        </div>
+      </section>
+
+      <section style={cardStyle}>
+        <div style={sectionHeaderStyle}>
           <h2 style={sectionTitle}>Profile Details</h2>
         </div>
 
         <div style={formGridStyle}>
           <label style={fieldStyle}>
             <span style={labelStyle}>Name</span>
-            <input placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} />
+            <input
+              placeholder="Your name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              style={inputStyle}
+            />
           </label>
 
           <label style={fieldStyle}>
@@ -438,9 +488,13 @@ export default function ProfilePage() {
           <h2 style={sectionTitle}>Actions</h2>
         </div>
 
-        <div style={actionGridStyle}>
-          <button onClick={saveProfile} style={primaryButtonStyle}>
+        <div style={stackedButtonWrapStyle}>
+          <button onClick={() => saveProfile()} style={primaryButtonStyle}>
             {profileId ? "Update Profile" : "Save Profile"}
+          </button>
+
+          <button onClick={handleSaveAndGoDashboard} style={primaryButtonStyle} disabled={savingAndLeaving}>
+            {savingAndLeaving ? "Saving..." : "Save Profile & Go to Dashboard"}
           </button>
 
           <button onClick={clearFormOnly} style={secondaryButtonStyle}>
@@ -543,9 +597,10 @@ const pageStyle: CSSProperties = {
   minHeight: "100vh",
   background: "linear-gradient(180deg, #050505 0%, #0a0a0a 35%, #0f0f0f 100%)",
   color: "white",
-  padding: "28px 20px 120px",
+  padding: "28px 20px 140px",
   fontFamily: "sans-serif",
 };
+
 const heroCardStyle: CSSProperties = {
   background: "linear-gradient(135deg, rgba(255,26,26,0.18) 0%, rgba(20,20,20,1) 55%, rgba(10,10,10,1) 100%)",
   border: "1px solid rgba(255,255,255,0.08)",
@@ -554,6 +609,7 @@ const heroCardStyle: CSSProperties = {
   marginBottom: "18px",
   boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
 };
+
 const eyebrowStyle: CSSProperties = {
   color: "#ff6b6b",
   fontSize: "12px",
@@ -561,6 +617,7 @@ const eyebrowStyle: CSSProperties = {
   letterSpacing: "0.14em",
   margin: "0 0 10px",
 };
+
 const heroTitleStyle: CSSProperties = {
   color: "#ffffff",
   fontSize: "30px",
@@ -568,33 +625,39 @@ const heroTitleStyle: CSSProperties = {
   fontWeight: 800,
   margin: "0 0 8px",
 };
+
 const heroSubStyle: CSSProperties = {
   color: "#d0d0d0",
   fontSize: "15px",
   margin: 0,
 };
+
 const heroStatsRow: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
   gap: "10px",
   marginTop: "20px",
 };
+
 const heroStatBox: CSSProperties = {
   background: "rgba(255,255,255,0.04)",
   border: "1px solid rgba(255,255,255,0.06)",
   borderRadius: "16px",
   padding: "14px 12px",
 };
+
 const heroStatLabel: CSSProperties = {
   color: "#aaa",
   fontSize: "12px",
   marginBottom: "6px",
 };
+
 const heroStatValueSmall: CSSProperties = {
   color: "#fff",
   fontSize: "16px",
   fontWeight: 800,
 };
+
 const accountBarStyle: CSSProperties = {
   marginTop: "18px",
   display: "flex",
@@ -603,20 +666,24 @@ const accountBarStyle: CSSProperties = {
   gap: "12px",
   flexWrap: "wrap",
 };
+
 const accountInfoStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: "4px",
 };
+
 const accountLabelStyle: CSSProperties = {
   color: "#aaa",
   fontSize: "12px",
 };
+
 const accountValueStyle: CSSProperties = {
   color: "#fff",
   fontSize: "14px",
   fontWeight: 700,
 };
+
 const cardStyle: CSSProperties = {
   background: "#121212",
   border: "1px solid #222",
@@ -625,6 +692,7 @@ const cardStyle: CSSProperties = {
   boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
   marginBottom: "16px",
 };
+
 const dangerCardStyle: CSSProperties = {
   background: "linear-gradient(135deg, rgba(90,16,16,0.35), rgba(18,18,18,1))",
   border: "1px solid rgba(255,80,80,0.18)",
@@ -633,6 +701,7 @@ const dangerCardStyle: CSSProperties = {
   boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
   marginBottom: "16px",
 };
+
 const sectionHeaderStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
@@ -640,18 +709,21 @@ const sectionHeaderStyle: CSSProperties = {
   gap: "12px",
   marginBottom: "12px",
 };
+
 const sectionTitle: CSSProperties = {
   color: "#ff4d4d",
   margin: 0,
   fontSize: "18px",
   fontWeight: 800,
 };
+
 const dangerSectionTitle: CSSProperties = {
   color: "#ff7b7b",
   margin: 0,
   fontSize: "18px",
   fontWeight: 800,
 };
+
 const dangerTextStyle: CSSProperties = {
   color: "#d7bcbc",
   fontSize: "14px",
@@ -659,20 +731,56 @@ const dangerTextStyle: CSSProperties = {
   marginTop: 0,
   marginBottom: "16px",
 };
+
+const stackedButtonWrapStyle: CSSProperties = {
+  display: "grid",
+  gap: "12px",
+};
+
+const largePrimaryNavButtonStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: "64px",
+  backgroundColor: "#ff1a1a",
+  borderRadius: "14px",
+  color: "white",
+  textDecoration: "none",
+  fontWeight: 800,
+  fontSize: "16px",
+};
+
+const largeSecondaryNavButtonStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: "64px",
+  backgroundColor: "#1c1c1c",
+  border: "1px solid #333",
+  borderRadius: "14px",
+  color: "white",
+  textDecoration: "none",
+  fontWeight: 800,
+  fontSize: "16px",
+};
+
 const formGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
   gap: "14px",
 };
+
 const fieldStyle: CSSProperties = {
   display: "grid",
   gap: "6px",
 };
+
 const labelStyle: CSSProperties = {
   color: "#ff6b6b",
   fontSize: "13px",
   fontWeight: 700,
 };
+
 const inputStyle: CSSProperties = {
   width: "100%",
   padding: "12px",
@@ -682,12 +790,9 @@ const inputStyle: CSSProperties = {
   color: "white",
   fontSize: "15px",
 };
-const actionGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: "12px",
-};
+
 const primaryButtonStyle: CSSProperties = {
+  width: "100%",
   backgroundColor: "#ff1a1a",
   border: "none",
   padding: "14px 18px",
@@ -697,7 +802,9 @@ const primaryButtonStyle: CSSProperties = {
   fontSize: "16px",
   cursor: "pointer",
 };
+
 const secondaryButtonStyle: CSSProperties = {
+  width: "100%",
   backgroundColor: "#222",
   border: "1px solid #333",
   padding: "14px 18px",
@@ -707,6 +814,7 @@ const secondaryButtonStyle: CSSProperties = {
   fontSize: "16px",
   cursor: "pointer",
 };
+
 const resetButtonStyle: CSSProperties = {
   width: "100%",
   backgroundColor: "#5a1010",
@@ -718,16 +826,19 @@ const resetButtonStyle: CSSProperties = {
   fontSize: "15px",
   cursor: "pointer",
 };
+
 const statusStyle: CSSProperties = {
   marginTop: "18px",
   marginBottom: "18px",
   color: "#cccccc",
 };
+
 const summaryGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
   gap: "12px",
 };
+
 const summaryCardStyle: CSSProperties = {
   background: "linear-gradient(135deg, rgba(255,26,26,0.10), rgba(255,255,255,0.02))",
   border: "1px solid rgba(255,255,255,0.06)",
@@ -737,10 +848,12 @@ const summaryCardStyle: CSSProperties = {
   flexDirection: "column",
   gap: "8px",
 };
+
 const summaryLabelStyle: CSSProperties = {
   color: "#aaa",
   fontSize: "13px",
 };
+
 const summaryValueStyle: CSSProperties = {
   color: "#fff",
   fontSize: "22px",

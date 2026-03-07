@@ -30,7 +30,7 @@ export default function SignupPage() {
 
     setLoading(true);
 
-    const { data, error } = await supabase.auth.signUp({
+    const { error } = await supabase.auth.signUp({
       email: email.trim(),
       password,
     });
@@ -41,15 +41,7 @@ export default function SignupPage() {
       return;
     }
 
-    if (data.user) {
-      setStatus("Account created. You can now log in.");
-    } else {
-      setStatus("Check your email to confirm your account, then log in.");
-    }
-
-    setLoading(false);
-    router.push("/login");
-    router.refresh();
+    router.push("/login?created=true");
   }
 
   return (
@@ -58,7 +50,7 @@ export default function SignupPage() {
         <p style={eyebrowStyle}>RESPAWN</p>
         <h1 style={titleStyle}>Create account</h1>
         <p style={subStyle}>
-          Set up your account so your workouts and profile stay tied to you.
+          Create your account, then build your profile and start tracking workouts.
         </p>
 
         <form onSubmit={handleSignup} style={formStyle}>
