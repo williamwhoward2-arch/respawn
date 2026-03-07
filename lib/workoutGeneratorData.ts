@@ -653,7 +653,7 @@ export const exerciseLibrary: Exercise[] = [
     equipmentAccess: ["full_gym", "dumbbells_only", "minimal_home_gym"],
     levels: ["beginner", "intermediate", "advanced"],
     workoutTags: ["lower", "full_body", "beginner_friendly", "female_friendly"],
-    styleTags: ["balanced", "general"],
+    styleTags: ["balanced"],
     laterality: "bilateral",
     fatigueCost: 2,
     complexity: 2,
