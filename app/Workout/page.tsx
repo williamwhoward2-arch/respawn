@@ -17,12 +17,27 @@ type SetEntry = {
   completed?: boolean;
 };
 
+type CardioEntry = {
+  id: string;
+  method: string;
+  miles: string;
+  minutes: string;
+  seconds: string;
+  completed?: boolean;
+  notes?: string;
+};
+
 type Exercise = {
   id: string;
   name: string;
   bodyPart: string;
   sets: SetEntry[];
   favorite?: boolean;
+  restSeconds?: number;
+  repRange?: string;
+  coachingNote?: string;
+  reason?: string;
+  notes?: string | null;
 };
 
 type LibraryExercise = {
@@ -38,6 +53,11 @@ type GeneratedWorkoutPayload = {
   exercises: {
     exercise_name: string;
     body_part: string;
+    restSeconds?: number;
+    repRange?: string;
+    coachingNote?: string;
+    reason?: string;
+    notes?: string | null;
     sets: {
       set_number: number;
       weight: string;
@@ -68,6 +88,138 @@ type AiSuggestion = {
   reason: string;
 };
 
+type SavedWorkoutState = {
+  workoutTitle: string;
+  exercises: Exercise[];
+  cardioEntries: CardioEntry[];
+  secondsElapsed: number;
+  timerRunning: boolean;
+  libraryChoice: string;
+  newExerciseName: string;
+  newBodyPart: string;
+};
+
+const CARDIO_METHODS = [
+  "Treadmill Walk",
+  "Treadmill Run",
+  "Jog",
+  "Outdoor Run",
+  "Bike",
+  "Spin Bike",
+  "Stairmaster",
+  "Elliptical",
+  "Rowing Machine",
+  "Swimming",
+  "Incline Walk",
+  "Hiking",
+  "Sled Push",
+  "Jump Rope",
+  "Assault Bike",
+  "SkiErg",
+  "Ruck Walk",
+  "Prowler Push",
+  "Other",
+];
+
+const WORKOUT_DRAFT_KEY = "respawn_active_workout_draft";
+
+const EXPANDED_EXERCISE_LIBRARY: LibraryExercise[] = [
+  { name: "Flat Barbell Bench Press", bodyPart: "Chest" },
+  { name: "Incline Barbell Bench Press", bodyPart: "Chest" },
+  { name: "Decline Bench Press", bodyPart: "Chest" },
+  { name: "Machine Chest Press", bodyPart: "Chest" },
+  { name: "Smith Machine Bench Press", bodyPart: "Chest" },
+  { name: "Incline Dumbbell Press", bodyPart: "Chest" },
+  { name: "Flat Dumbbell Press", bodyPart: "Chest" },
+  { name: "Chest Fly Machine", bodyPart: "Chest" },
+  { name: "Cable Fly", bodyPart: "Chest" },
+  { name: "High to Low Cable Fly", bodyPart: "Chest" },
+  { name: "Low to High Cable Fly", bodyPart: "Chest" },
+  { name: "Pec Deck", bodyPart: "Chest" },
+  { name: "Push-Up", bodyPart: "Chest" },
+  { name: "Weighted Push-Up", bodyPart: "Chest" },
+
+  { name: "Pull-Up", bodyPart: "Back" },
+  { name: "Weighted Pull-Up", bodyPart: "Back" },
+  { name: "Chin-Up", bodyPart: "Back" },
+  { name: "Lat Pulldown", bodyPart: "Back" },
+  { name: "Wide Grip Lat Pulldown", bodyPart: "Back" },
+  { name: "Neutral Grip Pulldown", bodyPart: "Back" },
+  { name: "Single Arm Lat Pulldown", bodyPart: "Back" },
+  { name: "Barbell Row", bodyPart: "Back" },
+  { name: "Pendlay Row", bodyPart: "Back" },
+  { name: "Chest Supported Row", bodyPart: "Back" },
+  { name: "Seated Cable Row", bodyPart: "Back" },
+  { name: "T-Bar Row", bodyPart: "Back" },
+  { name: "Machine Row", bodyPart: "Back" },
+  { name: "Single Arm Dumbbell Row", bodyPart: "Back" },
+  { name: "Straight Arm Pulldown", bodyPart: "Back" },
+  { name: "Deadlift", bodyPart: "Back" },
+  { name: "Rack Pull", bodyPart: "Back" },
+  { name: "Back Extension", bodyPart: "Back" },
+
+  { name: "Back Squat", bodyPart: "Legs" },
+  { name: "Front Squat", bodyPart: "Legs" },
+  { name: "Hack Squat", bodyPart: "Legs" },
+  { name: "Leg Press", bodyPart: "Legs" },
+  { name: "Bulgarian Split Squat", bodyPart: "Legs" },
+  { name: "Walking Lunge", bodyPart: "Legs" },
+  { name: "Reverse Lunge", bodyPart: "Legs" },
+  { name: "Step-Up", bodyPart: "Legs" },
+  { name: "Romanian Deadlift", bodyPart: "Legs" },
+  { name: "Stiff Leg Deadlift", bodyPart: "Legs" },
+  { name: "Leg Extension", bodyPart: "Legs" },
+  { name: "Seated Leg Curl", bodyPart: "Legs" },
+  { name: "Lying Leg Curl", bodyPart: "Legs" },
+  { name: "Standing Calf Raise", bodyPart: "Legs" },
+  { name: "Seated Calf Raise", bodyPart: "Legs" },
+  { name: "Calf Press", bodyPart: "Legs" },
+
+  { name: "Barbell Hip Thrust", bodyPart: "Glutes" },
+  { name: "Glute Bridge", bodyPart: "Glutes" },
+  { name: "Cable Kickback", bodyPart: "Glutes" },
+  { name: "Hip Abduction Machine", bodyPart: "Glutes" },
+  { name: "Frog Pump", bodyPart: "Glutes" },
+
+  { name: "Barbell Shoulder Press", bodyPart: "Shoulders" },
+  { name: "Dumbbell Shoulder Press", bodyPart: "Shoulders" },
+  { name: "Machine Shoulder Press", bodyPart: "Shoulders" },
+  { name: "Arnold Press", bodyPart: "Shoulders" },
+  { name: "Dumbbell Lateral Raise", bodyPart: "Shoulders" },
+  { name: "Cable Lateral Raise", bodyPart: "Shoulders" },
+  { name: "Machine Lateral Raise", bodyPart: "Shoulders" },
+  { name: "Rear Delt Fly", bodyPart: "Shoulders" },
+  { name: "Reverse Pec Deck", bodyPart: "Shoulders" },
+  { name: "Face Pull", bodyPart: "Shoulders" },
+  { name: "Upright Row", bodyPart: "Shoulders" },
+  { name: "Front Raise", bodyPart: "Shoulders" },
+
+  { name: "Barbell Curl", bodyPart: "Arms" },
+  { name: "EZ Bar Curl", bodyPart: "Arms" },
+  { name: "Alternating Dumbbell Curl", bodyPart: "Arms" },
+  { name: "Hammer Curl", bodyPart: "Arms" },
+  { name: "Cable Curl", bodyPart: "Arms" },
+  { name: "Preacher Curl", bodyPart: "Arms" },
+  { name: "Concentration Curl", bodyPart: "Arms" },
+  { name: "Close Grip Bench Press", bodyPart: "Arms" },
+  { name: "Skull Crusher", bodyPart: "Arms" },
+  { name: "Cable Triceps Pushdown", bodyPart: "Arms" },
+  { name: "Overhead Triceps Extension", bodyPart: "Arms" },
+  { name: "Dips", bodyPart: "Arms" },
+  { name: "Weighted Dips", bodyPart: "Arms" },
+  { name: "Wrist Curl", bodyPart: "Arms" },
+  { name: "Reverse Curl", bodyPart: "Arms" },
+
+  { name: "Cable Crunch", bodyPart: "Core" },
+  { name: "Hanging Leg Raise", bodyPart: "Core" },
+  { name: "Decline Sit-Up", bodyPart: "Core" },
+  { name: "Ab Wheel", bodyPart: "Core" },
+  { name: "Plank", bodyPart: "Core" },
+  { name: "Weighted Plank", bodyPart: "Core" },
+  { name: "Russian Twist", bodyPart: "Core" },
+  { name: "Toe Touch", bodyPart: "Core" },
+];
+
 function mapPrimaryMuscleToLibraryBodyPart(muscle: string): string {
   if (muscle === "chest") return "Chest";
   if (["back", "lats", "upper_back", "lower_back"].includes(muscle)) return "Back";
@@ -97,13 +249,15 @@ const BODY_PARTS = [
   "Push",
   "Pull",
   "Full Body",
+  "Cardio",
   "Other",
 ];
 
 function formatTime(totalSeconds: number) {
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
+  const safeSeconds = Math.max(0, totalSeconds);
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = safeSeconds % 60;
 
   return [
     String(hours).padStart(2, "0"),
@@ -176,6 +330,57 @@ function formatSmartNumber(value: number) {
   return value.toFixed(1).replace(/\.0$/, "");
 }
 
+function parseRepRange(repRange?: string) {
+  if (!repRange) return { min: 8, max: 12 };
+  const parts = repRange.split("-").map((part) => Number(part.trim()));
+  if (parts.length === 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1])) {
+    return { min: parts[0], max: parts[1] };
+  }
+  const single = Number(repRange);
+  if (Number.isFinite(single)) {
+    return { min: single, max: single };
+  }
+  return { min: 8, max: 12 };
+}
+
+function formatRestLabel(restSeconds?: number) {
+  if (!restSeconds) return "Rest as needed";
+  if (restSeconds < 60) return `${restSeconds}s rest`;
+  const minutes = Math.floor(restSeconds / 60);
+  const seconds = restSeconds % 60;
+  if (seconds === 0) return `${minutes} min rest`;
+  return `${minutes}m ${seconds}s rest`;
+}
+
+function getWorkoutWarmupText(exercises: Exercise[]) {
+  const compoundCount = exercises.filter((exercise) => {
+    const lowerName = exercise.name.toLowerCase();
+    return ["press", "squat", "row", "deadlift", "pulldown", "lung", "hip thrust", "shoulder press"].some((term) =>
+      lowerName.includes(term)
+    );
+  }).length;
+
+  if (compoundCount >= 2) {
+    return "Warm-up once for the session: 5–8 minutes of light movement, then 2–4 ramp-up sets for your first big lift. After that, only do feeler sets if a movement needs it.";
+  }
+
+  return "Warm-up once for the session: 3–5 minutes of easy movement plus 1–3 lighter ramp-up sets before your first working exercise.";
+}
+
+function getWorkoutFocusLine(title: string, exercises: Exercise[]) {
+  const bodyPartCounts = exercises.reduce<Record<string, number>>((acc, exercise) => {
+    acc[exercise.bodyPart] = (acc[exercise.bodyPart] || 0) + 1;
+    return acc;
+  }, {});
+
+  const topBodyPart = Object.entries(bodyPartCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "Workout";
+  const totalSets = exercises.reduce((sum, exercise) => sum + exercise.sets.length, 0);
+  const volumeTag = totalSets >= 18 ? "High Volume" : totalSets >= 10 ? "Moderate Volume" : "Low Volume";
+  const builderTag = title.toLowerCase().includes("strength") ? "Strength Builder" : "Bodybuilding Builder";
+
+  return `${topBodyPart} • ${builderTag} • ${volumeTag}`;
+}
+
 function getMostLikelyWeight(
   exerciseName: string,
   exercises: Exercise[],
@@ -239,17 +444,19 @@ function buildProgressionSuggestion(
   const currentSet = exercise.sets[setIndex];
   const currentWeight = toNumber(currentSet?.weight);
   const currentReps = toNumber(currentSet?.reps);
+  const repRange = parseRepRange(exercise.repRange);
+
+  const priorCompletedSets = [...exercise.sets]
+    .slice(0, setIndex + 1)
+    .filter(
+      (set) =>
+        set.completed &&
+        String(set.weight).trim() !== "" &&
+        String(set.reps).trim() !== ""
+    );
 
   const lastCompletedSet =
-    [...exercise.sets]
-      .slice(0, setIndex + 1)
-      .reverse()
-      .find(
-        (set) =>
-          set.completed &&
-          String(set.weight).trim() !== "" &&
-          String(set.reps).trim() !== ""
-      ) || null;
+    priorCompletedSets.length > 0 ? priorCompletedSets[priorCompletedSets.length - 1] : null;
 
   const history = historyMap[normalizeName(exercise.name)];
   const baseDefaults = getExerciseBaseDefaults(exercise, allExercises, historyMap);
@@ -260,50 +467,50 @@ function buildProgressionSuggestion(
 
   const referenceReps = lastCompletedSet
     ? toNumber(lastCompletedSet.reps)
-    : currentReps || toNumber(baseDefaults.reps) || toNumber(history?.lastReps) || 8;
+    : currentReps || toNumber(baseDefaults.reps) || toNumber(history?.lastReps) || repRange.min;
 
   if (!referenceWeight && !referenceReps) {
     return {
       weight: "",
-      reps: "8",
-      reason: "Start with a moderate working set and adjust after the first completion.",
+      reps: String(repRange.min),
+      reason: `Start near the bottom of your ${repRange.min}-${repRange.max} rep range and adjust after the first clean set.`,
     };
   }
 
   const increment = getWeightIncrement(referenceWeight || 20, exercise.bodyPart);
   let suggestedWeight = referenceWeight;
-  let suggestedReps = referenceReps || 8;
-  let reason = "Matched your most recent working set.";
+  let suggestedReps = Math.max(repRange.min, Math.min(referenceReps || repRange.min, repRange.max));
+  let reason = `Stay in the ${repRange.min}-${repRange.max} rep range and keep form tight.`;
 
-  if (referenceReps >= 12) {
+  if (referenceReps >= repRange.max + 1) {
     suggestedWeight = roundToIncrement(referenceWeight + increment, increment);
-    suggestedReps = Math.max(8, referenceReps - 2);
-    reason = `Strong prior set. AI suggests a small load bump of +${formatSmartNumber(
+    suggestedReps = repRange.min;
+    reason = `You overshot the rep target. AI suggests a small bump of +${formatSmartNumber(
+      increment
+    )} and resetting to the bottom of the range.`;
+  } else if (referenceReps === repRange.max) {
+    suggestedWeight = roundToIncrement(referenceWeight + increment, increment);
+    suggestedReps = repRange.min;
+    reason = `Top of range hit cleanly. AI suggests a small load increase of ${formatSmartNumber(
       increment
     )}.`;
-  } else if (referenceReps >= 10) {
-    suggestedWeight = roundToIncrement(referenceWeight + increment, increment);
-    suggestedReps = referenceReps;
-    reason = `You hit the top of the range. AI suggests progressing load by ${formatSmartNumber(
-      increment
-    )}.`;
-  } else if (referenceReps >= 8) {
+  } else if (referenceReps >= repRange.min && referenceReps < repRange.max) {
     suggestedWeight = referenceWeight;
-    suggestedReps = referenceReps;
-    reason = "Solid working range. Hold weight steady and beat it cleanly.";
-  } else if (referenceReps >= 6) {
+    suggestedReps = Math.min(repRange.max, referenceReps + 1);
+    reason = `Stay at the same load and try to add a rep while staying inside ${repRange.min}-${repRange.max}.`;
+  } else if (referenceReps === repRange.min - 1) {
     suggestedWeight = referenceWeight;
-    suggestedReps = Math.min(8, referenceReps + 1);
-    reason = "Stay here and try to recover a rep before adding weight.";
+    suggestedReps = repRange.min;
+    reason = `Almost there. Hold the weight steady and bring the set into the target rep range.`;
   } else {
     suggestedWeight = Math.max(0, roundToIncrement(referenceWeight - increment, increment));
-    suggestedReps = 8;
-    reason = "Reps dropped off. AI suggests a slight pullback to keep quality high.";
+    suggestedReps = repRange.min;
+    reason = `Reps fell below target. AI suggests a slight pullback so you can get back into the prescribed range.`;
   }
 
   return {
     weight: suggestedWeight ? formatSmartNumber(suggestedWeight) : "",
-    reps: suggestedReps ? String(suggestedReps) : "8",
+    reps: String(suggestedReps),
     reason,
   };
 }
@@ -318,6 +525,8 @@ export default function WorkoutPage() {
   const [status, setStatus] = useState("");
 
   const [libraryChoice, setLibraryChoice] = useState("");
+  const [librarySearch, setLibrarySearch] = useState("");
+  const [libraryFilter, setLibraryFilter] = useState("All");
   const [newExerciseName, setNewExerciseName] = useState("");
   const [newBodyPart, setNewBodyPart] = useState("");
 
@@ -330,6 +539,7 @@ export default function WorkoutPage() {
   const [workoutTitle, setWorkoutTitle] = useState("Build Your Session");
 
   const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [cardioEntries, setCardioEntries] = useState<CardioEntry[]>([]);
   const [historyMap, setHistoryMap] = useState<ExerciseHistoryMap>({});
 
   const exerciseCardRefs = useRef<Record<string, HTMLElement | null>>({});
@@ -435,6 +645,26 @@ export default function WorkoutPage() {
     const loadedHistoryMap = await loadExerciseHistory(user.id);
     setHistoryMap(loadedHistoryMap);
 
+    const savedDraft = localStorage.getItem(WORKOUT_DRAFT_KEY);
+    if (savedDraft) {
+      try {
+        const parsedDraft: SavedWorkoutState = JSON.parse(savedDraft);
+        setWorkoutTitle(parsedDraft.workoutTitle || "Build Your Session");
+        setExercises(Array.isArray(parsedDraft.exercises) ? parsedDraft.exercises : []);
+        setCardioEntries(Array.isArray(parsedDraft.cardioEntries) ? parsedDraft.cardioEntries : []);
+        setSecondsElapsed(parsedDraft.secondsElapsed || 0);
+        setTimerRunning(false);
+        setLibraryChoice(parsedDraft.libraryChoice || "");
+        setNewExerciseName(parsedDraft.newExerciseName || "");
+        setNewBodyPart(parsedDraft.newBodyPart || "");
+        setStatus("Recovered your in-progress workout.");
+        setAuthLoading(false);
+        return;
+      } catch (draftError) {
+        console.error("Failed to load workout draft:", draftError);
+      }
+    }
+
     const rawGeneratedWorkout = localStorage.getItem("respawn_generated_workout");
 
     if (rawGeneratedWorkout) {
@@ -448,6 +678,11 @@ export default function WorkoutPage() {
             id: makeId(),
             name: exercise.exercise_name,
             bodyPart: formatBodyPart(exercise.body_part),
+            restSeconds: exercise.restSeconds,
+            repRange: exercise.repRange,
+            coachingNote: exercise.coachingNote,
+            reason: exercise.reason,
+            notes: exercise.notes ?? null,
             sets:
               exercise.sets.length > 0
                 ? exercise.sets.map((set, setIndex) => ({
@@ -461,14 +696,14 @@ export default function WorkoutPage() {
                       String(set.reps ?? "").trim() !== ""
                         ? String(set.reps)
                         : setIndex === 0
-                        ? history?.lastReps || "8"
-                        : "8",
+                        ? history?.lastReps || exercise.repRange?.split("-")[0] || "8"
+                        : exercise.repRange?.split("-")[0] || "8",
                     completed: false,
                   }))
                 : [
                     {
                       weight: history?.lastWeight || "",
-                      reps: history?.lastReps || "8",
+                      reps: history?.lastReps || exercise.repRange?.split("-")[0] || "8",
                       completed: false,
                     },
                   ],
@@ -514,8 +749,35 @@ export default function WorkoutPage() {
     localStorage.setItem("respawn_custom_exercise_library", JSON.stringify(customLibrary));
   }, [customLibrary]);
 
+  useEffect(() => {
+    if (authLoading || finished) return;
+
+    const draft: SavedWorkoutState = {
+      workoutTitle,
+      exercises,
+      cardioEntries,
+      secondsElapsed,
+      timerRunning: false,
+      libraryChoice,
+      newExerciseName,
+      newBodyPart,
+    };
+
+    localStorage.setItem(WORKOUT_DRAFT_KEY, JSON.stringify(draft));
+  }, [
+    authLoading,
+    finished,
+    workoutTitle,
+    exercises,
+    cardioEntries,
+    secondsElapsed,
+    libraryChoice,
+    newExerciseName,
+    newBodyPart,
+  ]);
+
   const allExerciseLibrary = useMemo(() => {
-    const merged = [...customLibrary, ...BASE_EXERCISE_LIBRARY];
+    const merged = [...customLibrary, ...EXPANDED_EXERCISE_LIBRARY, ...BASE_EXERCISE_LIBRARY];
     const seen = new Set<string>();
 
     return merged.filter((item) => {
@@ -525,6 +787,16 @@ export default function WorkoutPage() {
       return true;
     });
   }, [customLibrary]);
+
+  const filteredExerciseLibrary = useMemo(() => {
+    return allExerciseLibrary.filter((item) => {
+      const matchesBodyPart = libraryFilter === "All" || item.bodyPart === libraryFilter;
+      const matchesSearch =
+        librarySearch.trim() === "" ||
+        item.name.toLowerCase().includes(librarySearch.trim().toLowerCase());
+      return matchesBodyPart && matchesSearch;
+    });
+  }, [allExerciseLibrary, libraryFilter, librarySearch]);
 
   const libraryMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -551,9 +823,32 @@ export default function WorkoutPage() {
     );
   }, [exercises]);
 
+  const completedCardio = useMemo(() => {
+    return cardioEntries.filter(
+      (entry) =>
+        entry.completed &&
+        (String(entry.minutes).trim() !== "" ||
+          String(entry.seconds).trim() !== "" ||
+          String(entry.miles).trim() !== "")
+    );
+  }, [cardioEntries]);
+
   const totalSets = completedSets.length;
   const totalReps = completedSets.reduce((sum, set) => sum + toNumber(set.reps), 0);
   const totalVolume = completedSets.reduce((sum, set) => sum + set.volume, 0);
+
+  const cardioMinutesTotal = completedCardio.reduce(
+    (sum, entry) => sum + toNumber(entry.minutes) + toNumber(entry.seconds) / 60,
+    0
+  );
+  const cardioMilesTotal = completedCardio.reduce((sum, entry) => sum + toNumber(entry.miles), 0);
+
+  const workoutFocusLine = useMemo(
+    () => getWorkoutFocusLine(workoutTitle, exercises),
+    [workoutTitle, exercises]
+  );
+
+  const warmupText = useMemo(() => getWorkoutWarmupText(exercises), [exercises]);
 
   const topSet = completedSets.reduce<(typeof completedSets)[number] | null>(
     (best, current) => {
@@ -574,6 +869,11 @@ export default function WorkoutPage() {
     topSet ? `Best set: ${topSet.exerciseName} ${topSet.weight} × ${topSet.reps}` : null,
     topExerciseByVolume
       ? `Top volume exercise: ${topExerciseByVolume[0]} (${topExerciseByVolume[1]} total volume)`
+      : null,
+    cardioMinutesTotal > 0
+      ? `Cardio completed: ${formatSmartNumber(cardioMinutesTotal)} min${
+          cardioMilesTotal > 0 ? ` • ${formatSmartNumber(cardioMilesTotal)} miles` : ""
+        }`
       : null,
   ].filter(Boolean) as string[];
 
@@ -712,7 +1012,7 @@ export default function WorkoutPage() {
 
       const suggestion = buildProgressionSuggestion(
         exercise,
-        nextSetIndex - 1,
+        Math.max(0, nextSetIndex - 1),
         updated,
         historyMap
       );
@@ -782,7 +1082,7 @@ export default function WorkoutPage() {
   function pushRecent(name: string) {
     setRecentExercises((prev) => {
       const next = [name, ...prev.filter((item) => item !== name)];
-      return next.slice(0, 8);
+      return next.slice(0, 10);
     });
   }
 
@@ -790,11 +1090,11 @@ export default function WorkoutPage() {
     const cleanName = name.trim();
     if (!cleanName) return;
 
-    const alreadyExistsInBase = BASE_EXERCISE_LIBRARY.some(
+    const existsInFullLibrary = [...BASE_EXERCISE_LIBRARY, ...EXPANDED_EXERCISE_LIBRARY].some(
       (item) => normalizeName(item.name) === normalizeName(cleanName)
     );
 
-    if (alreadyExistsInBase) return;
+    if (existsInFullLibrary) return;
 
     setCustomLibrary((prev) => {
       const exists = prev.some((item) => normalizeName(item.name) === normalizeName(cleanName));
@@ -839,6 +1139,7 @@ export default function WorkoutPage() {
     setNewExerciseName("");
     setNewBodyPart("");
     setLibraryChoice("");
+    setLibrarySearch("");
     setStatus("Exercise added at the top.");
 
     setTimeout(() => {
@@ -892,6 +1193,78 @@ export default function WorkoutPage() {
     setStatus("Timer reset.");
   }
 
+  function adjustTimer(seconds: number) {
+    setSecondsElapsed((prev) => Math.max(0, prev + seconds));
+    setStatus("Timer adjusted.");
+  }
+
+  function addCardioEntry() {
+    setCardioEntries((prev) => [
+      ...prev,
+      {
+        id: makeId(),
+        method: "Treadmill Walk",
+        miles: "",
+        minutes: "",
+        seconds: "",
+        completed: false,
+        notes: "",
+      },
+    ]);
+    setStatus("Cardio entry added.");
+  }
+
+  function updateCardioField(
+    cardioId: string,
+    field: "method" | "miles" | "minutes" | "seconds" | "notes",
+    value: string
+  ) {
+    setCardioEntries((prev) =>
+      prev.map((entry) =>
+        entry.id === cardioId
+          ? { ...entry, [field]: value, completed: false }
+          : entry
+      )
+    );
+  }
+
+  function toggleCardioCompleted(cardioId: string) {
+    setCardioEntries((prev) =>
+      prev.map((entry) =>
+        entry.id === cardioId ? { ...entry, completed: !entry.completed } : entry
+      )
+    );
+    setStatus("Cardio updated.");
+  }
+
+  function removeCardioEntry(cardioId: string) {
+    setCardioEntries((prev) => prev.filter((entry) => entry.id !== cardioId));
+    setStatus("Cardio removed.");
+  }
+
+  async function persistCardioEntries(workoutId: number) {
+    if (!authUser?.id || completedCardio.length === 0) return { saved: false, skipped: true };
+
+    const rows = completedCardio.map((entry, index) => ({
+      workout_id: workoutId,
+      user_id: authUser.id,
+      entry_number: index + 1,
+      method: entry.method,
+      miles: toNumber(entry.miles) || null,
+      duration_seconds: toNumber(entry.minutes) * 60 + toNumber(entry.seconds),
+      notes: entry.notes?.trim() || null,
+    }));
+
+    const { error } = await supabase.from("workout_cardio").insert(rows);
+
+    if (error) {
+      console.warn("Cardio table insert skipped:", error.message);
+      return { saved: false, skipped: true, error };
+    }
+
+    return { saved: true, skipped: false };
+  }
+
   async function handleSignOut() {
     const { error } = await supabase.auth.signOut();
 
@@ -909,19 +1282,34 @@ export default function WorkoutPage() {
       return;
     }
 
-    if (completedSets.length === 0) {
-      setStatus("Complete at least one full set before finishing the workout.");
+    if (completedSets.length === 0 && completedCardio.length === 0) {
+      setStatus("Complete at least one set or cardio entry before finishing the workout.");
       return;
     }
 
     setStatus("Saving workout...");
 
+    const cardioSummary =
+      completedCardio.length > 0
+        ? `Cardio: ${completedCardio
+            .map((entry) => {
+              const minutes = toNumber(entry.minutes);
+              const seconds = toNumber(entry.seconds);
+              const total = minutes + seconds / 60;
+              const miles = toNumber(entry.miles);
+              return `${entry.method}${
+                total > 0 ? ` ${formatSmartNumber(total)} min` : ""
+              }${miles > 0 ? ` ${formatSmartNumber(miles)} mi` : ""}`;
+            })
+            .join(", ")}`
+        : null;
+
     const workoutPayload = {
       user_id: authUser.id,
       workout_name: workoutTitle === "Build Your Session" ? "Custom Workout" : workoutTitle,
       duration_seconds: secondsElapsed,
-      day_type: "workout",
-      notes: workoutHighlights.join(" • ") || null,
+      day_type: exercises.length === 0 && completedCardio.length > 0 ? "cardio" : "workout",
+      notes: [...workoutHighlights, cardioSummary].filter(Boolean).join(" • ") || null,
     };
 
     const { data: workoutData, error: workoutError } = await supabase
@@ -961,16 +1349,25 @@ export default function WorkoutPage() {
         }))
     );
 
-    const { error: setsError } = await supabase.from("workout_sets").insert(allSets);
+    if (allSets.length > 0) {
+      const { error: setsError } = await supabase.from("workout_sets").insert(allSets);
 
-    if (setsError) {
-      setStatus(`Error saving sets: ${setsError.message}`);
-      return;
+      if (setsError) {
+        setStatus(`Error saving sets: ${setsError.message}`);
+        return;
+      }
     }
+
+    const cardioResult = await persistCardioEntries(workoutId);
 
     setTimerRunning(false);
     exercises.forEach((exercise) => pushRecent(exercise.name));
-    setStatus("Workout saved successfully.");
+    localStorage.removeItem(WORKOUT_DRAFT_KEY);
+    setStatus(
+      cardioResult.saved
+        ? "Workout and cardio saved successfully."
+        : "Workout saved successfully. Cardio summary was preserved in notes."
+    );
     setFinished(true);
   }
 
@@ -992,10 +1389,17 @@ export default function WorkoutPage() {
         <section style={heroCardStyle}>
           <p style={eyebrowStyle}>WORKOUT COMPLETE</p>
           <h1 style={heroTitleStyle}>Session Logged</h1>
+          <p style={heroMetaStyle}>{workoutFocusLine}</p>
           <p style={heroSubStyle}>
             {totalSets} sets • {totalReps} reps • {totalVolume} total volume
           </p>
           <p style={{ ...heroSubStyle, marginTop: 8 }}>Duration {formatTime(secondsElapsed)}</p>
+          {cardioMinutesTotal > 0 && (
+            <p style={{ ...heroSubStyle, marginTop: 8 }}>
+              Cardio {formatSmartNumber(cardioMinutesTotal)} min
+              {cardioMilesTotal > 0 ? ` • ${formatSmartNumber(cardioMilesTotal)} miles` : ""}
+            </p>
+          )}
         </section>
 
         <section style={cardStyle}>
@@ -1037,37 +1441,6 @@ export default function WorkoutPage() {
             <p style={mutedStyle}>No highlights yet.</p>
           )}
         </section>
-
-        <section style={cardStyle}>
-          {exercises.map((exercise) => {
-            const completedExerciseSets = exercise.sets.filter(
-              (set) =>
-                set.completed &&
-                String(set.weight).trim() !== "" &&
-                String(set.reps).trim() !== ""
-            );
-
-            return (
-              <div key={exercise.id} style={{ marginBottom: 18 }}>
-                <h2 style={exerciseTitleStyle}>{exercise.name}</h2>
-                <p style={exerciseBodyPartStyle}>{exercise.bodyPart}</p>
-
-                {completedExerciseSets.length === 0 ? (
-                  <p style={mutedStyle}>No completed sets logged.</p>
-                ) : (
-                  completedExerciseSets.map((set, index) => (
-                    <div key={index} style={setRowStyle}>
-                      <span>Set {index + 1}</span>
-                      <span>
-                        {set.weight} lbs × {set.reps}
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-            );
-          })}
-        </section>
       </main>
     );
   }
@@ -1077,9 +1450,15 @@ export default function WorkoutPage() {
       <section style={heroCardStyle}>
         <p style={eyebrowStyle}>RESPAWN WORKOUT</p>
         <h1 style={heroTitleStyle}>{workoutTitle}</h1>
+        <p style={heroMetaStyle}>{workoutFocusLine}</p>
         <p style={heroSubStyle}>
-          Add exercises, enter your actual sets, then confirm each set when it is done.
+          Log your real working sets, use AI to stay in the right rep ranges, and keep your session protected even if you refresh.
         </p>
+
+        <div style={warmupHeroCardStyle}>
+          <div style={warmupTitleStyle}>Warm-Up</div>
+          <div style={warmupTextStyle}>{warmupText}</div>
+        </div>
 
         <div style={accountBarStyle}>
           <div style={accountInfoStyle}>
@@ -1126,6 +1505,18 @@ export default function WorkoutPage() {
             Reset
           </button>
         </div>
+
+        <div style={{ ...buttonRowStyle, marginTop: 10 }}>
+          <button onClick={() => adjustTimer(-60)} style={secondaryButtonStyle}>
+            -1 min
+          </button>
+          <button onClick={() => adjustTimer(60)} style={secondaryButtonStyle}>
+            +1 min
+          </button>
+          <button onClick={() => adjustTimer(300)} style={secondaryButtonStyle}>
+            +5 min
+          </button>
+        </div>
       </section>
 
       <section style={cardStyle}>
@@ -1134,13 +1525,33 @@ export default function WorkoutPage() {
         </div>
 
         <div style={inputGridStyle}>
+          <input
+            placeholder="Search exercise library"
+            value={librarySearch}
+            onChange={(e) => setLibrarySearch(e.target.value)}
+            style={inputStyle}
+          />
+
+          <select
+            value={libraryFilter}
+            onChange={(e) => setLibraryFilter(e.target.value)}
+            style={selectStyle}
+          >
+            <option value="All">All body parts</option>
+            {BODY_PARTS.filter((part) => part !== "Push" && part !== "Pull" && part !== "Full Body").map((part) => (
+              <option key={part} value={part}>
+                {part}
+              </option>
+            ))}
+          </select>
+
           <select
             value={libraryChoice}
             onChange={(e) => setLibraryChoice(e.target.value)}
             style={selectStyle}
           >
-            <option value="">Choose from library</option>
-            {allExerciseLibrary.map((exercise) => (
+            <option value="">Choose from library ({filteredExerciseLibrary.length})</option>
+            {filteredExerciseLibrary.slice(0, 250).map((exercise) => (
               <option key={exercise.name} value={exercise.name}>
                 {exercise.name} • {exercise.bodyPart}
                 {exercise.custom ? " • Custom" : ""}
@@ -1174,7 +1585,7 @@ export default function WorkoutPage() {
         </div>
 
         <p style={helperTextStyle}>
-          New custom exercises are saved into your library automatically on this device.
+          Your library is now expanded in-app, and any truly custom exercise you add will still be saved locally on this device.
         </p>
 
         {favoriteExercises.length > 0 && (
@@ -1212,12 +1623,102 @@ export default function WorkoutPage() {
         )}
       </section>
 
+      <section style={cardStyle}>
+        <div style={sectionHeaderStyle}>
+          <h2 style={sectionTitle}>Add Cardio</h2>
+        </div>
+
+        <div style={buttonRowStyle}>
+          <button onClick={addCardioEntry} style={primaryButtonStyle}>
+            Add Cardio
+          </button>
+        </div>
+
+        <p style={helperTextStyle}>
+          Cardio is fully tracked in the UI now. It will also save into Supabase once you add a dedicated <code>workout_cardio</code> table.
+        </p>
+
+        {cardioEntries.length > 0 ? (
+          <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
+            {cardioEntries.map((entry, index) => (
+              <div key={entry.id} style={cardioCardStyle}>
+                <div style={cardioHeaderStyle}>
+                  <div style={cardioTitleStyle}>Cardio {index + 1}</div>
+                  <div style={buttonRowStyle}>
+                    <button
+                      onClick={() => toggleCardioCompleted(entry.id)}
+                      style={entry.completed ? completeButtonActiveStyle : completeButtonStyle}
+                    >
+                      {entry.completed ? "Completed" : "Complete Cardio"}
+                    </button>
+                    <button
+                      onClick={() => removeCardioEntry(entry.id)}
+                      style={dangerButtonStyle}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+
+                <div style={inputGridStyle}>
+                  <select
+                    value={entry.method}
+                    onChange={(e) => updateCardioField(entry.id, "method", e.target.value)}
+                    style={selectStyle}
+                  >
+                    {CARDIO_METHODS.map((method) => (
+                      <option key={method} value={method}>
+                        {method}
+                      </option>
+                    ))}
+                  </select>
+
+                  <input
+                    placeholder="Miles"
+                    value={entry.miles}
+                    onChange={(e) => updateCardioField(entry.id, "miles", e.target.value)}
+                    style={smallInputStyle}
+                    inputMode="decimal"
+                  />
+
+                  <input
+                    placeholder="Minutes"
+                    value={entry.minutes}
+                    onChange={(e) => updateCardioField(entry.id, "minutes", e.target.value)}
+                    style={smallInputStyle}
+                    inputMode="numeric"
+                  />
+
+                  <input
+                    placeholder="Seconds"
+                    value={entry.seconds}
+                    onChange={(e) => updateCardioField(entry.id, "seconds", e.target.value)}
+                    style={smallInputStyle}
+                    inputMode="numeric"
+                  />
+
+                  <input
+                    placeholder="Notes (optional)"
+                    value={entry.notes || ""}
+                    onChange={(e) => updateCardioField(entry.id, "notes", e.target.value)}
+                    style={inputStyle}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p style={{ ...helperTextStyle, marginTop: 12 }}>
+            Track treadmill work, jogging, swimming, biking, stairmaster, SkiErg, sled pushes, and more with time and miles.
+          </p>
+        )}
+      </section>
+
       {exercises.length === 0 ? (
         <section style={emptyStateCardStyle}>
           <h2 style={emptyStateTitleStyle}>No exercises added yet</h2>
           <p style={emptyStateTextStyle}>
-            Start by adding an exercise above. Then log weight, reps, and confirm each
-            completed set.
+            Start by adding an exercise above. Then log weight, reps, and confirm each completed set.
           </p>
         </section>
       ) : (
@@ -1256,6 +1757,29 @@ export default function WorkoutPage() {
                 </button>
               </div>
             </div>
+
+            {!!exercise.restSeconds && (
+              <div style={restTagStyle}>Recommended rest: {formatRestLabel(exercise.restSeconds)}</div>
+            )}
+
+            {(exercise.coachingNote || exercise.reason || exercise.notes || exercise.repRange) && (
+              <div style={exerciseInfoCardStyle}>
+                {exercise.repRange && (
+                  <div style={exerciseInfoLineStyle}>
+                    Target rep range: {exercise.repRange}
+                  </div>
+                )}
+                {exercise.coachingNote && (
+                  <div style={exerciseInfoLineStyle}>{exercise.coachingNote}</div>
+                )}
+                {exercise.reason && (
+                  <div style={exerciseMutedLineStyle}>{exercise.reason}</div>
+                )}
+                {exercise.notes && (
+                  <div style={exerciseSpecialLineStyle}>{exercise.notes}</div>
+                )}
+              </div>
+            )}
 
             <div style={{ marginTop: 18 }}>
               <h3 style={setsHeaderStyle}>Sets</h3>
@@ -1385,10 +1909,25 @@ const heroTitleStyle: CSSProperties = {
   margin: "0 0 8px",
 };
 
+const heroMetaStyle: CSSProperties = {
+  color: "#ffb8b8",
+  fontSize: "14px",
+  fontWeight: 700,
+  margin: "0 0 8px",
+};
+
 const heroSubStyle: CSSProperties = {
   color: "#d0d0d0",
   fontSize: "15px",
   margin: 0,
+};
+
+const warmupHeroCardStyle: CSSProperties = {
+  marginTop: "14px",
+  background: "rgba(255,255,255,0.05)",
+  border: "1px solid rgba(255,255,255,0.08)",
+  borderRadius: "16px",
+  padding: "12px 14px",
 };
 
 const accountBarStyle: CSSProperties = {
@@ -1461,6 +2000,28 @@ const exerciseCardStyle: CSSProperties = {
   padding: "20px",
   boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
   marginBottom: "16px",
+};
+
+const cardioCardStyle: CSSProperties = {
+  background: "rgba(255,255,255,0.03)",
+  border: "1px solid rgba(255,255,255,0.06)",
+  borderRadius: "16px",
+  padding: "14px",
+};
+
+const cardioHeaderStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "10px",
+  flexWrap: "wrap",
+  marginBottom: "12px",
+};
+
+const cardioTitleStyle: CSSProperties = {
+  color: "#fff",
+  fontWeight: 800,
+  fontSize: "15px",
 };
 
 const emptyStateCardStyle: CSSProperties = {
@@ -1619,6 +2180,59 @@ const exerciseBodyPartStyle: CSSProperties = {
   margin: 0,
 };
 
+const warmupTitleStyle: CSSProperties = {
+  color: "#ff8b8b",
+  fontSize: "12px",
+  fontWeight: 800,
+  textTransform: "uppercase",
+  letterSpacing: "0.06em",
+  marginBottom: "6px",
+};
+
+const warmupTextStyle: CSSProperties = {
+  color: "#efefef",
+  fontSize: "13px",
+  lineHeight: 1.45,
+};
+
+const restTagStyle: CSSProperties = {
+  display: "inline-flex",
+  marginTop: "12px",
+  padding: "7px 10px",
+  borderRadius: "999px",
+  background: "rgba(255,255,255,0.05)",
+  border: "1px solid rgba(255,255,255,0.08)",
+  color: "#d8d8d8",
+  fontSize: "12px",
+  fontWeight: 700,
+};
+
+const exerciseInfoCardStyle: CSSProperties = {
+  marginTop: "12px",
+  background: "rgba(255,255,255,0.025)",
+  border: "1px solid rgba(255,255,255,0.05)",
+  borderRadius: "14px",
+  padding: "12px",
+  display: "grid",
+  gap: "6px",
+};
+
+const exerciseInfoLineStyle: CSSProperties = {
+  color: "#ededed",
+  fontSize: "13px",
+};
+
+const exerciseMutedLineStyle: CSSProperties = {
+  color: "#a7a7a7",
+  fontSize: "12px",
+};
+
+const exerciseSpecialLineStyle: CSSProperties = {
+  color: "#ffb0b0",
+  fontSize: "12px",
+  fontWeight: 700,
+};
+
 const setsHeaderStyle: CSSProperties = {
   marginBottom: "10px",
   color: "#ffffff",
@@ -1635,18 +2249,6 @@ const editableSetRowStyle: CSSProperties = {
   alignItems: "center",
   gap: "10px",
   flexWrap: "wrap",
-};
-
-const setRowStyle: CSSProperties = {
-  marginTop: "8px",
-  color: "#ddd",
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: "12px",
-  flexWrap: "wrap",
-  padding: "10px 0",
-  borderBottom: "1px solid #222",
 };
 
 const setNumberStyle: CSSProperties = {
