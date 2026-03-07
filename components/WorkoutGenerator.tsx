@@ -23,6 +23,34 @@ type EquipmentAccess =
   | "bodyweight_only"
   | "minimal_home_gym";
 
+type WorkoutStyle =
+  | "balanced"
+  | "bodybuilding"
+  | "high_volume"
+  | "old_school_mass"
+  | "intensity"
+  | "pump"
+  | "strength_size";
+
+type VolumeTier = "moderate" | "high" | "brutal";
+
+type MuscleEmphasis =
+  | "upper_chest"
+  | "mid_chest"
+  | "lower_chest"
+  | "lat_width"
+  | "mid_back_thickness"
+  | "upper_back_detail"
+  | "quad_bias"
+  | "glute_bias"
+  | "hamstring_bias"
+  | "front_delt_bias"
+  | "side_delt_bias"
+  | "rear_delt_bias"
+  | "tricep_long_head"
+  | "bicep_peak"
+  | "core_stability";
+
 type WorkoutSet = {
   weight: string;
   reps: string;
@@ -41,6 +69,9 @@ type WorkoutExercise = {
   reason?: string;
   restSeconds?: number;
   targetWeight?: number | null;
+  repRange?: string;
+  category?: string;
+  notes?: string | null;
 };
 
 type WorkoutPayload = {
@@ -51,6 +82,9 @@ type WorkoutPayload = {
   coachNote?: string;
   intensityLabel?: "easy" | "moderate" | "hard";
   progressionAdvice?: string[];
+  totalWorkingSets?: number;
+  workoutStyle?: string;
+  emphasis?: MuscleEmphasis | "";
   exercises: WorkoutExercise[];
 };
 
@@ -87,7 +121,50 @@ const EQUIPMENT_OPTIONS: { label: string; value: EquipmentAccess }[] = [
   { label: "Minimal home gym", value: "minimal_home_gym" },
 ];
 
-const DURATION_OPTIONS = [30, 45, 60, 75];
+const STYLE_OPTIONS: { label: string; value: WorkoutStyle }[] = [
+  { label: "Balanced Hypertrophy", value: "balanced" },
+  { label: "Bodybuilding", value: "bodybuilding" },
+  { label: "High Volume Mass", value: "high_volume" },
+  { label: "Old School Mass", value: "old_school_mass" },
+  { label: "Intensity Focus", value: "intensity" },
+  { label: "Pump Focus", value: "pump" },
+  { label: "Strength + Size", value: "strength_size" },
+];
+
+const VOLUME_OPTIONS: { label: string; value: VolumeTier }[] = [
+  { label: "Standard", value: "moderate" },
+  { label: "High", value: "high" },
+  { label: "Brutal", value: "brutal" },
+];
+
+const DURATION_OPTIONS = [30, 45, 60, 75, 90];
+
+const EMPHASIS_OPTIONS: Partial<Record<BodyPart, { label: string; value: MuscleEmphasis }[]>> = {
+  chest: [
+    { label: "Upper Chest", value: "upper_chest" },
+    { label: "Mid Chest", value: "mid_chest" },
+    { label: "Lower Chest", value: "lower_chest" },
+  ],
+  back: [
+    { label: "Lat Width", value: "lat_width" },
+    { label: "Mid-Back Thickness", value: "mid_back_thickness" },
+    { label: "Upper Back Detail", value: "upper_back_detail" },
+  ],
+  legs: [
+    { label: "Quad Bias", value: "quad_bias" },
+    { label: "Glute Bias", value: "glute_bias" },
+    { label: "Hamstring Bias", value: "hamstring_bias" },
+  ],
+  shoulders: [
+    { label: "Front Delt Bias", value: "front_delt_bias" },
+    { label: "Side Delt Bias", value: "side_delt_bias" },
+    { label: "Rear Delt Bias", value: "rear_delt_bias" },
+  ],
+  arms: [
+    { label: "Bicep Peak", value: "bicep_peak" },
+    { label: "Tricep Long Head", value: "tricep_long_head" },
+  ],
+};
 
 function toTitleCase(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (char) => char.toUpperCase());
@@ -100,83 +177,7 @@ function parseCommaList(value: string): string[] {
     .filter(Boolean);
 }
 
-function getIntensityLabel(duration: number, goal: Goal): "easy" | "moderate" | "hard" {
-  if (duration <= 30) return "easy";
-  if (goal === "strength" || duration >= 60) return "hard";
-  return "moderate";
-}
-
-function buildCoachNote(params: {
-  goal: Goal;
-  bodyPart: BodyPart;
-  experienceLevel: ExperienceLevel;
-  duration: number;
-  equipmentAccess: EquipmentAccess;
-  soreAreas: string[];
-  fatiguedAreas: string[];
-}) {
-  const { goal, bodyPart, experienceLevel, duration, equipmentAccess, soreAreas, fatiguedAreas } = params;
-
-  const intro =
-    goal === "strength"
-      ? "Today is built around heavier compound work and quality execution."
-      : goal === "hypertrophy"
-      ? "Today is built around strong muscle stimulus, controlled reps, and repeatable progression."
-      : goal === "fat_loss"
-      ? "Today keeps training density high while still preserving good lifting quality."
-      : "Today balances performance, volume, and consistency.";
-
-  const focus = ` Focus is ${toTitleCase(bodyPart)} with a ${toTitleCase(
-    equipmentAccess
-  )} setup for a ${duration}-minute session.`;
-
-  const level = ` Programming is adjusted for a ${experienceLevel} lifter.`;
-
-  const recovery =
-    soreAreas.length || fatiguedAreas.length
-      ? ` Recovery inputs were considered${soreAreas.length ? `, especially soreness around ${soreAreas.join(", ")}` : ""}${
-          fatiguedAreas.length ? `${soreAreas.length ? " and" : ""} fatigue in ${fatiguedAreas.join(", ")}` : ""
-        }.`
-      : "";
-
-  return `${intro}${focus}${level}${recovery}`;
-}
-
-function buildProgressionAdvice(goal: Goal, exercises: WorkoutExercise[]): string[] {
-  const base = [
-    "Try to beat last session by 1 rep on at least one or two exercises.",
-    "When all sets hit the top of the rep target with clean form, increase the load next time.",
-  ];
-
-  if (goal === "strength") {
-    base.push("Keep your compound lifts crisp and avoid grinding every set to failure.");
-  } else if (goal === "hypertrophy") {
-    base.push("Control the eccentric and keep tension on the target muscle instead of rushing reps.");
-  } else if (goal === "fat_loss") {
-    base.push("Keep rest honest and move with purpose to maintain training density.");
-  } else {
-    base.push("Aim for clean form and steady consistency before chasing heavier loads.");
-  }
-
-  if (exercises.some((exercise) => exercise.body_part === "core")) {
-    base.push("For core work, add reps or time before making the movement more difficult.");
-  }
-
-  return base;
-}
-
-function normalizeLocalWorkout(
-  workout: any,
-  params: {
-    goal: Goal;
-    bodyPart: BodyPart;
-    experienceLevel: ExperienceLevel;
-    duration: number;
-    equipmentAccess: EquipmentAccess;
-    soreAreas: string[];
-    fatiguedAreas: string[];
-  }
-): WorkoutPayload {
+function normalizeLocalWorkout(workout: any): WorkoutPayload {
   const normalizedExercises: WorkoutExercise[] = Array.isArray(workout?.exercises)
     ? workout.exercises.map((exercise: any, index: number) => ({
         id: exercise?.id ?? `${exercise?.exercise_name ?? "exercise"}-${index}`,
@@ -184,18 +185,13 @@ function normalizeLocalWorkout(
         name: exercise?.exercise_name ?? exercise?.name ?? "Exercise",
         body_part: exercise?.body_part ?? exercise?.bodyPart ?? "general",
         bodyPart: exercise?.body_part ?? exercise?.bodyPart ?? "general",
-        coachingNote:
-          exercise?.coachingNote ??
-          (exercise?.sets?.length >= 4
-            ? "Main movement. Push performance while keeping form tight."
-            : exercise?.sets?.length === 3
-            ? "Controlled working sets. Own the tempo and range."
-            : "Use this to finish with quality reps and tension."),
-        reason: exercise?.reason ?? `Selected for ${toTitleCase(params.bodyPart)} ${params.goal.replaceAll("_", " ")} training.`,
-        restSeconds:
-          exercise?.restSeconds ??
-          (params.goal === "strength" ? 120 : exercise?.sets?.length >= 4 ? 90 : 60),
+        coachingNote: exercise?.coachingNote ?? "",
+        reason: exercise?.reason ?? "",
+        restSeconds: exercise?.restSeconds ?? null,
         targetWeight: exercise?.targetWeight ?? null,
+        repRange: exercise?.repRange ?? "",
+        category: exercise?.category ?? "",
+        notes: exercise?.notes ?? null,
         sets: Array.isArray(exercise?.sets)
           ? exercise.sets.map((set: any) => ({
               weight: String(set?.weight ?? ""),
@@ -209,22 +205,16 @@ function normalizeLocalWorkout(
   return {
     workout_name: workout?.workout_name ?? workout?.workoutName ?? "Generated Workout",
     workoutName: workout?.workout_name ?? workout?.workoutName ?? "Generated Workout",
-    estimated_duration: workout?.estimated_duration ?? workout?.estimatedDurationMinutes ?? params.duration,
-    estimatedDurationMinutes: workout?.estimated_duration ?? workout?.estimatedDurationMinutes ?? params.duration,
-    coachNote:
-      workout?.coachNote ??
-      buildCoachNote({
-        goal: params.goal,
-        bodyPart: params.bodyPart,
-        experienceLevel: params.experienceLevel,
-        duration: params.duration,
-        equipmentAccess: params.equipmentAccess,
-        soreAreas: params.soreAreas,
-        fatiguedAreas: params.fatiguedAreas,
-      }),
-    intensityLabel: workout?.intensityLabel ?? getIntensityLabel(params.duration, params.goal),
-    progressionAdvice:
-      workout?.progressionAdvice ?? buildProgressionAdvice(params.goal, normalizedExercises),
+    estimated_duration:
+      workout?.estimated_duration ?? workout?.estimatedDurationMinutes ?? 45,
+    estimatedDurationMinutes:
+      workout?.estimated_duration ?? workout?.estimatedDurationMinutes ?? 45,
+    coachNote: workout?.coachNote ?? "",
+    intensityLabel: workout?.intensityLabel ?? "moderate",
+    progressionAdvice: workout?.progressionAdvice ?? [],
+    totalWorkingSets: workout?.totalWorkingSets ?? 0,
+    workoutStyle: workout?.workoutStyle ?? "",
+    emphasis: workout?.emphasis ?? "",
     exercises: normalizedExercises,
   };
 }
@@ -232,22 +222,27 @@ function normalizeLocalWorkout(
 export default function WorkoutGenerator() {
   const router = useRouter();
 
-  const [bodyPart, setBodyPart] = useState<BodyPart>("push");
+  const [bodyPart, setBodyPart] = useState<BodyPart>("chest");
   const [goal, setGoal] = useState<Goal>("hypertrophy");
-  const [duration, setDuration] = useState<number>(45);
+  const [duration, setDuration] = useState<number>(60);
   const [experienceLevel, setExperienceLevel] = useState<ExperienceLevel>("intermediate");
   const [equipmentAccess, setEquipmentAccess] = useState<EquipmentAccess>("full_gym");
+  const [style, setStyle] = useState<WorkoutStyle>("bodybuilding");
+  const [volumeTier, setVolumeTier] = useState<VolumeTier>("high");
+  const [emphasis, setEmphasis] = useState<MuscleEmphasis | "">("");
 
   const [soreAreasInput, setSoreAreasInput] = useState("");
   const [fatiguedAreasInput, setFatiguedAreasInput] = useState("");
   const [preferredExercisesInput, setPreferredExercisesInput] = useState("");
   const [excludedExercisesInput, setExcludedExercisesInput] = useState("");
+  const [recentExerciseIdsInput, setRecentExerciseIdsInput] = useState("");
 
   const [generatedWorkout, setGeneratedWorkout] = useState<WorkoutPayload | null>(null);
   const [error, setError] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
 
   const readableEquipment = useMemo(() => toTitleCase(equipmentAccess), [equipmentAccess]);
+  const emphasisOptions = EMPHASIS_OPTIONS[bodyPart] ?? [];
 
   function handleGenerate() {
     try {
@@ -259,6 +254,7 @@ export default function WorkoutGenerator() {
       const fatiguedAreas = parseCommaList(fatiguedAreasInput);
       const preferredExercises = parseCommaList(preferredExercisesInput);
       const excludedExercises = parseCommaList(excludedExercisesInput);
+      const recentExerciseIds = parseCommaList(recentExerciseIdsInput);
 
       const workout = generateWorkout({
         bodyPart,
@@ -266,22 +262,17 @@ export default function WorkoutGenerator() {
         duration,
         experienceLevel,
         equipmentAccess,
+        soreAreas,
         fatiguedAreas,
         preferredExercises,
         excludedExercises,
+        style,
+        volumeTier,
+        emphasis,
+        recentExerciseIds,
       });
 
-      const normalizedWorkout = normalizeLocalWorkout(workout, {
-        goal,
-        bodyPart,
-        experienceLevel,
-        duration,
-        equipmentAccess,
-        soreAreas,
-        fatiguedAreas,
-      });
-
-      setGeneratedWorkout(normalizedWorkout);
+      setGeneratedWorkout(normalizeLocalWorkout(workout));
     } catch (err) {
       console.error(err);
       setGeneratedWorkout(null);
@@ -305,7 +296,7 @@ export default function WorkoutGenerator() {
       </div>
 
       <p style={mutedStyle}>
-        Generate a smarter workout based on your goal, time, experience, equipment, and recovery inputs.
+        Build smarter workouts with style, volume, emphasis, recovery inputs, and better exercise variety.
       </p>
 
       <div style={formGridStyle}>
@@ -313,7 +304,11 @@ export default function WorkoutGenerator() {
           <span style={labelStyle}>Body Part</span>
           <select
             value={bodyPart}
-            onChange={(e) => setBodyPart(e.target.value as BodyPart)}
+            onChange={(e) => {
+              const nextBodyPart = e.target.value as BodyPart;
+              setBodyPart(nextBodyPart);
+              setEmphasis("");
+            }}
             style={inputStyle}
           >
             {BODY_PART_OPTIONS.map((option) => (
@@ -332,6 +327,36 @@ export default function WorkoutGenerator() {
             style={inputStyle}
           >
             {GOAL_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label style={fieldStyle}>
+          <span style={labelStyle}>Workout Style</span>
+          <select
+            value={style}
+            onChange={(e) => setStyle(e.target.value as WorkoutStyle)}
+            style={inputStyle}
+          >
+            {STYLE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label style={fieldStyle}>
+          <span style={labelStyle}>Volume</span>
+          <select
+            value={volumeTier}
+            onChange={(e) => setVolumeTier(e.target.value as VolumeTier)}
+            style={inputStyle}
+          >
+            {VOLUME_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
@@ -385,6 +410,23 @@ export default function WorkoutGenerator() {
         </label>
 
         <label style={fieldStyle}>
+          <span style={labelStyle}>Focus / Emphasis</span>
+          <select
+            value={emphasis}
+            onChange={(e) => setEmphasis(e.target.value as MuscleEmphasis | "")}
+            style={inputStyle}
+            disabled={emphasisOptions.length === 0}
+          >
+            <option value="">No special focus</option>
+            {emphasisOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label style={fieldStyle}>
           <span style={labelStyle}>Sore Areas (optional)</span>
           <input
             value={soreAreasInput}
@@ -419,7 +461,17 @@ export default function WorkoutGenerator() {
           <input
             value={excludedExercisesInput}
             onChange={(e) => setExcludedExercisesInput(e.target.value)}
-            placeholder="deadlift, skull_crushers"
+            placeholder="skull_crushers, back_squat"
+            style={inputStyle}
+          />
+        </label>
+
+        <label style={fieldStyle}>
+          <span style={labelStyle}>Recent Exercises To Avoid (optional)</span>
+          <input
+            value={recentExerciseIdsInput}
+            onChange={(e) => setRecentExerciseIdsInput(e.target.value)}
+            placeholder="bench_press, incline_dumbbell_press"
             style={inputStyle}
           />
         </label>
@@ -449,12 +501,24 @@ export default function WorkoutGenerator() {
             <div>
               <h3 style={previewTitleStyle}>{generatedWorkout.workout_name}</h3>
               <p style={mutedStyle}>
-                {generatedWorkout.estimated_duration} min • {toTitleCase(experienceLevel)} • {readableEquipment}
+                {generatedWorkout.estimated_duration} min
+                {generatedWorkout.totalWorkingSets
+                  ? ` • ${generatedWorkout.totalWorkingSets} working sets`
+                  : ""}
+                {generatedWorkout.workoutStyle
+                  ? ` • ${generatedWorkout.workoutStyle}`
+                  : ""}
+                {" • "}
+                {toTitleCase(experienceLevel)}
+                {" • "}
+                {readableEquipment}
               </p>
             </div>
 
             {generatedWorkout.intensityLabel && (
-              <span style={badgeStyle}>{toTitleCase(generatedWorkout.intensityLabel)}</span>
+              <span style={badgeStyle}>
+                {toTitleCase(generatedWorkout.intensityLabel)}
+              </span>
             )}
           </div>
 
@@ -472,21 +536,31 @@ export default function WorkoutGenerator() {
                   <div>
                     <div style={previewExerciseStyle}>{exercise.exercise_name}</div>
                     <div style={previewSubStyle}>
-                      {exercise.sets.length} sets • {exercise.sets[0]?.reps || "--"} reps
+                      {exercise.sets.length} sets
+                      {exercise.repRange
+                        ? ` • ${exercise.repRange} reps`
+                        : exercise.sets[0]?.reps
+                        ? ` • ${exercise.sets[0]?.reps} reps`
+                        : ""}
                       {exercise.restSeconds ? ` • ${exercise.restSeconds}s rest` : ""}
                     </div>
                   </div>
 
-                  <div style={miniMuscleTagStyle}>{toTitleCase(exercise.body_part)}</div>
+                  <div style={miniMuscleTagStyle}>
+                    {toTitleCase(exercise.body_part)}
+                  </div>
                 </div>
 
-                {(exercise.coachingNote || exercise.reason) && (
+                {(exercise.coachingNote || exercise.reason || exercise.notes) && (
                   <div style={exerciseMetaStyle}>
                     {exercise.coachingNote && (
                       <div style={exerciseNoteStyle}>{exercise.coachingNote}</div>
                     )}
                     {exercise.reason && (
                       <div style={exerciseReasonStyle}>{exercise.reason}</div>
+                    )}
+                    {exercise.notes && (
+                      <div style={exerciseSpecialNoteStyle}>{exercise.notes}</div>
                     )}
                   </div>
                 )}
@@ -719,6 +793,12 @@ const exerciseNoteStyle: CSSProperties = {
 const exerciseReasonStyle: CSSProperties = {
   color: "#9f9f9f",
   fontSize: "12px",
+};
+
+const exerciseSpecialNoteStyle: CSSProperties = {
+  color: "#ffb0b0",
+  fontSize: "12px",
+  fontWeight: 700,
 };
 
 const tipsCardStyle: CSSProperties = {
