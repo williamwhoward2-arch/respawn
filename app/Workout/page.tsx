@@ -8,7 +8,9 @@ import {
   type CSSProperties,
 } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { exerciseLibrary } from "@/lib/workoutGeneratorData";
 
 type SetEntry = {
   weight: string;
@@ -45,31 +47,28 @@ type GeneratedWorkoutPayload = {
   }[];
 };
 
-const BASE_EXERCISE_LIBRARY: LibraryExercise[] = [
-  { name: "Bench Press", bodyPart: "Chest" },
-  { name: "Incline Bench Press", bodyPart: "Chest" },
-  { name: "Machine Chest Press", bodyPart: "Chest" },
-  { name: "Cable Fly", bodyPart: "Chest" },
-  { name: "Lat Pulldown", bodyPart: "Back" },
-  { name: "Barbell Row", bodyPart: "Back" },
-  { name: "Seated Cable Row", bodyPart: "Back" },
-  { name: "Pull-Up", bodyPart: "Back" },
-  { name: "Squat", bodyPart: "Legs" },
-  { name: "Leg Press", bodyPart: "Legs" },
-  { name: "RDL", bodyPart: "Legs" },
-  { name: "Leg Curl", bodyPart: "Legs" },
-  { name: "Overhead Press", bodyPart: "Shoulders" },
-  { name: "Lateral Raise", bodyPart: "Shoulders" },
-  { name: "Rear Delt Fly", bodyPart: "Shoulders" },
-  { name: "Barbell Curl", bodyPart: "Arms" },
-  { name: "Hammer Curl", bodyPart: "Arms" },
-  { name: "Tricep Pushdown", bodyPart: "Arms" },
-  { name: "Skullcrusher", bodyPart: "Arms" },
-  { name: "Crunch", bodyPart: "Core" },
-  { name: "Plank", bodyPart: "Core" },
-  { name: "Hip Thrust", bodyPart: "Glutes" },
-  { name: "Glute Bridge", bodyPart: "Glutes" },
-];
+type AuthUser = {
+  id: string;
+  email?: string;
+};
+
+function mapPrimaryMuscleToLibraryBodyPart(muscle: string): string {
+  if (muscle === "chest") return "Chest";
+  if (["back", "lats", "upper_back", "lower_back"].includes(muscle)) return "Back";
+  if (["quads", "hamstrings", "calves"].includes(muscle)) return "Legs";
+  if (muscle === "glutes") return "Glutes";
+  if (["shoulders", "front_delts", "side_delts", "rear_delts"].includes(muscle)) {
+    return "Shoulders";
+  }
+  if (["biceps", "triceps", "forearms"].includes(muscle)) return "Arms";
+  if (muscle === "core") return "Core";
+  return "Other";
+}
+
+const BASE_EXERCISE_LIBRARY: LibraryExercise[] = exerciseLibrary.map((exercise) => ({
+  name: exercise.name,
+  bodyPart: mapPrimaryMuscleToLibraryBodyPart(exercise.primaryMuscle),
+}));
 
 const BODY_PARTS = [
   "Chest",
@@ -143,28 +142,20 @@ function getMostLikelyWeight(exerciseName: string, exercises: Exercise[]) {
 
     for (let i = exercise.sets.length - 1; i >= 0; i -= 1) {
       const set = exercise.sets[i];
-      if (String(set.weight).trim() !== "") {
-        return String(set.weight);
-      }
+      if (String(set.weight).trim() !== "") return String(set.weight);
     }
   }
 
   return "";
 }
 
-function getMostLikelyReps(
-  exerciseName: string,
-  exercises: Exercise[],
-  fallback = ""
-) {
+function getMostLikelyReps(exerciseName: string, exercises: Exercise[], fallback = "") {
   for (const exercise of exercises) {
     if (normalizeName(exercise.name) !== normalizeName(exerciseName)) continue;
 
     for (let i = exercise.sets.length - 1; i >= 0; i -= 1) {
       const set = exercise.sets[i];
-      if (String(set.reps).trim() !== "") {
-        return String(set.reps);
-      }
+      if (String(set.reps).trim() !== "") return String(set.reps);
     }
   }
 
@@ -172,6 +163,11 @@ function getMostLikelyReps(
 }
 
 export default function WorkoutPage() {
+  const router = useRouter();
+
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
   const [finished, setFinished] = useState(false);
   const [status, setStatus] = useState("");
 
@@ -192,6 +188,34 @@ export default function WorkoutPage() {
   const exerciseCardRefs = useRef<Record<string, HTMLElement | null>>({});
 
   useEffect(() => {
+    void initializeWorkoutPage();
+  }, []);
+
+  async function initializeWorkoutPage() {
+    setAuthLoading(true);
+
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser();
+
+    if (error) {
+      console.error("Get user error:", error);
+      setStatus(`Error loading account: ${error.message}`);
+      setAuthLoading(false);
+      return;
+    }
+
+    if (!user) {
+      router.replace("/login");
+      return;
+    }
+
+    setAuthUser({
+      id: user.id,
+      email: user.email,
+    });
+
     const savedRecent = localStorage.getItem("respawn_recent_exercises");
     const savedFavorites = localStorage.getItem("respawn_favorite_exercises");
     const savedCustomLibrary = localStorage.getItem("respawn_custom_exercise_library");
@@ -208,38 +232,40 @@ export default function WorkoutPage() {
 
     const rawGeneratedWorkout = localStorage.getItem("respawn_generated_workout");
 
-    if (!rawGeneratedWorkout) return;
+    if (rawGeneratedWorkout) {
+      try {
+        const parsed: GeneratedWorkoutPayload = JSON.parse(rawGeneratedWorkout);
 
-    try {
-      const parsed: GeneratedWorkoutPayload = JSON.parse(rawGeneratedWorkout);
+        const mappedExercises: Exercise[] = parsed.exercises.map((exercise) => ({
+          id: makeId(),
+          name: exercise.exercise_name,
+          bodyPart: formatBodyPart(exercise.body_part),
+          sets:
+            exercise.sets.length > 0
+              ? exercise.sets.map((set) => ({
+                  weight: set.weight ?? "",
+                  reps: set.reps ?? "",
+                  completed: false,
+                }))
+              : [{ weight: "", reps: "", completed: false }],
+          favorite: parsedFavorites.includes(exercise.exercise_name),
+        }));
 
-      const mappedExercises: Exercise[] = parsed.exercises.map((exercise) => ({
-        id: makeId(),
-        name: exercise.exercise_name,
-        bodyPart: formatBodyPart(exercise.body_part),
-        sets:
-          exercise.sets.length > 0
-            ? exercise.sets.map((set) => ({
-                weight: set.weight ?? "",
-                reps: set.reps ?? "",
-                completed: false,
-              }))
-            : [{ weight: "", reps: "", completed: false }],
-        favorite: parsedFavorites.includes(exercise.exercise_name),
-      }));
+        if (mappedExercises.length > 0) {
+          setExercises(mappedExercises);
+          setWorkoutTitle(parsed.workout_name || "Generated Workout");
+          setStatus(`${parsed.workout_name} loaded.`);
+        }
 
-      if (mappedExercises.length > 0) {
-        setExercises(mappedExercises);
-        setWorkoutTitle(parsed.workout_name || "Generated Workout");
-        setStatus(`${parsed.workout_name} loaded.`);
+        localStorage.removeItem("respawn_generated_workout");
+      } catch (loadError) {
+        console.error("Failed to load generated workout:", loadError);
+        setStatus("Could not load generated workout.");
       }
-
-      localStorage.removeItem("respawn_generated_workout");
-    } catch (error) {
-      console.error("Failed to load generated workout:", error);
-      setStatus("Could not load generated workout.");
     }
-  }, []);
+
+    setAuthLoading(false);
+  }
 
   useEffect(() => {
     if (!timerRunning) return;
@@ -256,17 +282,11 @@ export default function WorkoutPage() {
   }, [recentExercises]);
 
   useEffect(() => {
-    localStorage.setItem(
-      "respawn_favorite_exercises",
-      JSON.stringify(favoriteExercises)
-    );
+    localStorage.setItem("respawn_favorite_exercises", JSON.stringify(favoriteExercises));
   }, [favoriteExercises]);
 
   useEffect(() => {
-    localStorage.setItem(
-      "respawn_custom_exercise_library",
-      JSON.stringify(customLibrary)
-    );
+    localStorage.setItem("respawn_custom_exercise_library", JSON.stringify(customLibrary));
   }, [customLibrary]);
 
   const allExerciseLibrary = useMemo(() => {
@@ -326,9 +346,7 @@ export default function WorkoutPage() {
   ).sort((a, b) => b[1] - a[1])[0];
 
   const workoutHighlights = [
-    topSet
-      ? `Best set: ${topSet.exerciseName} ${topSet.weight} × ${topSet.reps}`
-      : null,
+    topSet ? `Best set: ${topSet.exerciseName} ${topSet.weight} × ${topSet.reps}` : null,
     topExerciseByVolume
       ? `Top volume exercise: ${topExerciseByVolume[0]} (${topExerciseByVolume[1]} total volume)`
       : null,
@@ -358,6 +376,8 @@ export default function WorkoutPage() {
   }
 
   function toggleSetCompleted(exerciseIndex: number, setIndex: number) {
+    let blocked = false;
+
     setExercises((prev) => {
       const updated = [...prev];
       const exercise = { ...updated[exerciseIndex] };
@@ -368,7 +388,7 @@ export default function WorkoutPage() {
       const hasReps = String(currentSet.reps).trim() !== "";
 
       if (!hasWeight || !hasReps) {
-        setStatus("Enter both weight and reps before marking a set complete.");
+        blocked = true;
         return prev;
       }
 
@@ -381,6 +401,8 @@ export default function WorkoutPage() {
       updated[exerciseIndex] = exercise;
       return updated;
     });
+
+    if (blocked) setStatus("Enter both weight and reps before marking a set complete.");
   }
 
   function addSet(exerciseIndex: number) {
@@ -432,14 +454,9 @@ export default function WorkoutPage() {
 
       updated[exerciseIndex] = {
         ...exercise,
-        sets: [
-          {
-            weight: defaultWeight,
-            reps: defaultReps,
-            completed: false,
-          },
-        ],
+        sets: [{ weight: defaultWeight, reps: defaultReps, completed: false }],
       };
+
       return updated;
     });
 
@@ -473,16 +490,10 @@ export default function WorkoutPage() {
     if (alreadyExistsInBase) return;
 
     setCustomLibrary((prev) => {
-      const exists = prev.some(
-        (item) => normalizeName(item.name) === normalizeName(cleanName)
-      );
-
+      const exists = prev.some((item) => normalizeName(item.name) === normalizeName(cleanName));
       if (exists) return prev;
 
-      return [
-        { name: cleanName, bodyPart: bodyPart || "Other", custom: true },
-        ...prev,
-      ];
+      return [{ name: cleanName, bodyPart: bodyPart || "Other", custom: true }, ...prev];
     });
   }
 
@@ -511,13 +522,7 @@ export default function WorkoutPage() {
       id: makeId(),
       name: cleanName,
       bodyPart: cleanBodyPart,
-      sets: [
-        {
-          weight: defaultWeight,
-          reps: defaultReps,
-          completed: false,
-        },
-      ],
+      sets: [{ weight: defaultWeight, reps: defaultReps, completed: false }],
       favorite: favoriteExercises.includes(cleanName),
     };
 
@@ -580,32 +585,50 @@ export default function WorkoutPage() {
     setStatus("Timer reset.");
   }
 
+  async function handleSignOut() {
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      setStatus(`Error signing out: ${error.message}`);
+      return;
+    }
+
+    router.replace("/login");
+  }
+
   async function finishWorkout() {
-    setStatus("Saving workout...");
+    if (!authUser?.id) {
+      setStatus("You must be signed in to save a workout.");
+      return;
+    }
 
     if (completedSets.length === 0) {
       setStatus("Complete at least one full set before finishing the workout.");
       return;
     }
 
+    setStatus("Saving workout...");
+
     const workoutPayload = {
-      workout_name:
-        workoutTitle === "Build Your Session" ? "Custom Workout" : workoutTitle,
+      user_id: authUser.id,
+      workout_name: workoutTitle === "Build Your Session" ? "Custom Workout" : workoutTitle,
       duration_seconds: secondsElapsed,
+      day_type: "workout",
+      notes: workoutHighlights.join(" • ") || null,
     };
 
     const { data: workoutData, error: workoutError } = await supabase
       .from("workouts")
-      .insert([workoutPayload])
-      .select();
+      .insert(workoutPayload)
+      .select()
+      .single();
 
     if (workoutError) {
-      console.error("Workout save error:", workoutError);
       setStatus(`Error saving workout: ${workoutError.message}`);
       return;
     }
 
-    const workoutId = workoutData?.[0]?.id;
+    const workoutId = workoutData?.id;
 
     if (!workoutId) {
       setStatus("Workout saved, but no workout ID was returned.");
@@ -622,6 +645,7 @@ export default function WorkoutPage() {
         )
         .map((set, index) => ({
           workout_id: workoutId,
+          user_id: authUser.id,
           exercise_name: exercise.name,
           body_part: exercise.bodyPart,
           set_number: index + 1,
@@ -630,23 +654,29 @@ export default function WorkoutPage() {
         }))
     );
 
-    if (allSets.length === 0) {
-      setStatus("No completed sets to save.");
-      return;
-    }
-
     const { error: setsError } = await supabase.from("workout_sets").insert(allSets);
 
     if (setsError) {
-      console.error("Set save error:", setsError);
       setStatus(`Error saving sets: ${setsError.message}`);
       return;
     }
 
     setTimerRunning(false);
     exercises.forEach((exercise) => pushRecent(exercise.name));
-    setStatus("Workout saved to Supabase.");
+    setStatus("Workout saved successfully.");
     setFinished(true);
+  }
+
+  if (authLoading) {
+    return (
+      <main style={pageStyle}>
+        <section style={heroCardStyle}>
+          <p style={eyebrowStyle}>RESPAWN WORKOUT</p>
+          <h1 style={heroTitleStyle}>Loading workout...</h1>
+          <p style={heroSubStyle}>Checking your account and session.</p>
+        </section>
+      </main>
+    );
   }
 
   if (finished) {
@@ -658,9 +688,7 @@ export default function WorkoutPage() {
           <p style={heroSubStyle}>
             {totalSets} sets • {totalReps} reps • {totalVolume} total volume
           </p>
-          <p style={{ ...heroSubStyle, marginTop: 8 }}>
-            Duration {formatTime(secondsElapsed)}
-          </p>
+          <p style={{ ...heroSubStyle, marginTop: 8 }}>Duration {formatTime(secondsElapsed)}</p>
         </section>
 
         <section style={cardStyle}>
@@ -723,9 +751,7 @@ export default function WorkoutPage() {
                   completedExerciseSets.map((set, index) => (
                     <div key={index} style={setRowStyle}>
                       <span>Set {index + 1}</span>
-                      <span>
-                        {set.weight} lbs × {set.reps}
-                      </span>
+                      <span>{set.weight} lbs × {set.reps}</span>
                     </div>
                   ))
                 )}
@@ -755,6 +781,17 @@ export default function WorkoutPage() {
           Add exercises, enter your actual sets, then confirm each set when it is done.
         </p>
 
+        <div style={accountBarStyle}>
+          <div style={accountInfoStyle}>
+            <span style={accountLabelStyle}>Signed in as</span>
+            <span style={accountValueStyle}>{authUser?.email || authUser?.id}</span>
+          </div>
+
+          <button onClick={handleSignOut} style={secondaryButtonStyle}>
+            Sign Out
+          </button>
+        </div>
+
         <div style={heroStatsRow}>
           <div style={heroStatBox}>
             <span style={heroStatLabel}>Duration</span>
@@ -779,15 +816,9 @@ export default function WorkoutPage() {
         <div style={timerDisplayStyle}>{formatTime(secondsElapsed)}</div>
 
         <div style={buttonRowStyle}>
-          <button onClick={startTimer} style={primaryButtonStyle}>
-            Start
-          </button>
-          <button onClick={stopTimer} style={secondaryButtonStyle}>
-            Stop
-          </button>
-          <button onClick={resetTimer} style={dangerButtonStyle}>
-            Reset
-          </button>
+          <button onClick={startTimer} style={primaryButtonStyle}>Start</button>
+          <button onClick={stopTimer} style={secondaryButtonStyle}>Stop</button>
+          <button onClick={resetTimer} style={dangerButtonStyle}>Reset</button>
         </div>
       </section>
 
@@ -797,11 +828,7 @@ export default function WorkoutPage() {
         </div>
 
         <div style={inputGridStyle}>
-          <select
-            value={libraryChoice}
-            onChange={(e) => setLibraryChoice(e.target.value)}
-            style={selectStyle}
-          >
+          <select value={libraryChoice} onChange={(e) => setLibraryChoice(e.target.value)} style={selectStyle}>
             <option value="">Choose from library</option>
             {allExerciseLibrary.map((exercise) => (
               <option key={exercise.name} value={exercise.name}>
@@ -818,22 +845,14 @@ export default function WorkoutPage() {
             style={inputStyle}
           />
 
-          <select
-            value={newBodyPart}
-            onChange={(e) => setNewBodyPart(e.target.value)}
-            style={selectStyle}
-          >
+          <select value={newBodyPart} onChange={(e) => setNewBodyPart(e.target.value)} style={selectStyle}>
             <option value="">Select body part</option>
             {BODY_PARTS.map((part) => (
-              <option key={part} value={part}>
-                {part}
-              </option>
+              <option key={part} value={part}>{part}</option>
             ))}
           </select>
 
-          <button onClick={addExercise} style={primaryButtonStyle}>
-            Add Exercise
-          </button>
+          <button onClick={addExercise} style={primaryButtonStyle}>Add Exercise</button>
         </div>
 
         <p style={helperTextStyle}>
@@ -845,11 +864,7 @@ export default function WorkoutPage() {
             <p style={subtleLabelStyle}>Favorites</p>
             <div style={chipWrapStyle}>
               {favoriteExercises.map((name) => (
-                <button
-                  key={name}
-                  onClick={() => addRecentExercise(name)}
-                  style={chipButtonStyle}
-                >
+                <button key={name} onClick={() => addRecentExercise(name)} style={chipButtonStyle}>
                   {name}
                 </button>
               ))}
@@ -862,11 +877,7 @@ export default function WorkoutPage() {
             <p style={subtleLabelStyle}>Recent</p>
             <div style={chipWrapStyle}>
               {recentExercises.map((name) => (
-                <button
-                  key={name}
-                  onClick={() => addRecentExercise(name)}
-                  style={chipButtonStyle}
-                >
+                <button key={name} onClick={() => addRecentExercise(name)} style={chipButtonStyle}>
                   {name}
                 </button>
               ))}
@@ -879,8 +890,7 @@ export default function WorkoutPage() {
         <section style={emptyStateCardStyle}>
           <h2 style={emptyStateTitleStyle}>No exercises added yet</h2>
           <p style={emptyStateTextStyle}>
-            Start by adding an exercise above. Then log weight, reps, and confirm
-            each completed set.
+            Start by adding an exercise above. Then log weight, reps, and confirm each completed set.
           </p>
         </section>
       ) : (
@@ -899,16 +909,10 @@ export default function WorkoutPage() {
               </div>
 
               <div style={buttonRowStyle}>
-                <button
-                  onClick={() => toggleFavorite(exercise.name)}
-                  style={secondaryButtonStyle}
-                >
+                <button onClick={() => toggleFavorite(exercise.name)} style={secondaryButtonStyle}>
                   {favoriteExercises.includes(exercise.name) ? "Unfavorite" : "Favorite"}
                 </button>
-                <button
-                  onClick={() => resetExerciseSets(index)}
-                  style={secondaryButtonStyle}
-                >
+                <button onClick={() => resetExerciseSets(index)} style={secondaryButtonStyle}>
                   Reset Sets
                 </button>
                 <button onClick={() => removeExercise(index)} style={dangerButtonStyle}>
@@ -927,9 +931,7 @@ export default function WorkoutPage() {
                   <input
                     placeholder="Weight"
                     value={set.weight}
-                    onChange={(e) =>
-                      updateSetField(index, setIndex, "weight", e.target.value)
-                    }
+                    onChange={(e) => updateSetField(index, setIndex, "weight", e.target.value)}
                     style={smallInputStyle}
                     inputMode="decimal"
                   />
@@ -937,9 +939,7 @@ export default function WorkoutPage() {
                   <input
                     placeholder="Reps"
                     value={set.reps}
-                    onChange={(e) =>
-                      updateSetField(index, setIndex, "reps", e.target.value)
-                    }
+                    onChange={(e) => updateSetField(index, setIndex, "reps", e.target.value)}
                     style={smallInputStyle}
                     inputMode="numeric"
                   />
@@ -951,10 +951,7 @@ export default function WorkoutPage() {
                     {set.completed ? "Completed" : "Complete Set"}
                   </button>
 
-                  <button
-                    onClick={() => removeSet(index, setIndex)}
-                    style={dangerButtonStyle}
-                  >
+                  <button onClick={() => removeSet(index, setIndex)} style={dangerButtonStyle}>
                     Remove Set
                   </button>
                 </div>
@@ -986,17 +983,14 @@ const pageStyle: CSSProperties = {
   padding: "28px 20px 120px",
   fontFamily: "sans-serif",
 };
-
 const heroCardStyle: CSSProperties = {
-  background:
-    "linear-gradient(135deg, rgba(255,26,26,0.18) 0%, rgba(20,20,20,1) 55%, rgba(10,10,10,1) 100%)",
+  background: "linear-gradient(135deg, rgba(255,26,26,0.18) 0%, rgba(20,20,20,1) 55%, rgba(10,10,10,1) 100%)",
   border: "1px solid rgba(255,255,255,0.08)",
   borderRadius: "24px",
   padding: "24px",
   marginBottom: "18px",
   boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
 };
-
 const eyebrowStyle: CSSProperties = {
   color: "#ff6b6b",
   fontSize: "12px",
@@ -1004,7 +998,6 @@ const eyebrowStyle: CSSProperties = {
   letterSpacing: "0.14em",
   margin: "0 0 10px",
 };
-
 const heroTitleStyle: CSSProperties = {
   color: "#ffffff",
   fontSize: "30px",
@@ -1012,20 +1005,39 @@ const heroTitleStyle: CSSProperties = {
   fontWeight: 800,
   margin: "0 0 8px",
 };
-
 const heroSubStyle: CSSProperties = {
   color: "#d0d0d0",
   fontSize: "15px",
   margin: 0,
 };
-
+const accountBarStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "12px",
+  flexWrap: "wrap",
+  marginTop: "18px",
+};
+const accountInfoStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "4px",
+};
+const accountLabelStyle: CSSProperties = {
+  color: "#aaa",
+  fontSize: "12px",
+};
+const accountValueStyle: CSSProperties = {
+  color: "#fff",
+  fontSize: "14px",
+  fontWeight: 700,
+};
 const heroStatsRow: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
   gap: "10px",
   marginTop: "20px",
 };
-
 const heroStatBox: CSSProperties = {
   background: "rgba(255,255,255,0.04)",
   border: "1px solid rgba(255,255,255,0.06)",
@@ -1034,19 +1046,16 @@ const heroStatBox: CSSProperties = {
   display: "flex",
   flexDirection: "column",
 };
-
 const heroStatLabel: CSSProperties = {
   color: "#aaaaaa",
   fontSize: "12px",
   marginBottom: "6px",
 };
-
 const heroStatValue: CSSProperties = {
   color: "#ffffff",
   fontSize: "18px",
   fontWeight: 800,
 };
-
 const cardStyle: CSSProperties = {
   background: "#121212",
   border: "1px solid #222",
@@ -1055,7 +1064,6 @@ const cardStyle: CSSProperties = {
   boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
   marginBottom: "16px",
 };
-
 const exerciseCardStyle: CSSProperties = {
   background: "#121212",
   border: "1px solid #222",
@@ -1064,7 +1072,6 @@ const exerciseCardStyle: CSSProperties = {
   boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
   marginBottom: "16px",
 };
-
 const emptyStateCardStyle: CSSProperties = {
   background: "#121212",
   border: "1px dashed #333",
@@ -1073,20 +1080,17 @@ const emptyStateCardStyle: CSSProperties = {
   textAlign: "center",
   marginBottom: "16px",
 };
-
 const emptyStateTitleStyle: CSSProperties = {
   color: "#ffffff",
   fontSize: "22px",
   fontWeight: 800,
   margin: "0 0 8px",
 };
-
 const emptyStateTextStyle: CSSProperties = {
   color: "#9d9d9d",
   fontSize: "15px",
   margin: 0,
 };
-
 const sectionHeaderStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
@@ -1094,14 +1098,12 @@ const sectionHeaderStyle: CSSProperties = {
   gap: "12px",
   marginBottom: "12px",
 };
-
 const sectionTitle: CSSProperties = {
   color: "#ff4d4d",
   margin: 0,
   fontSize: "18px",
   fontWeight: 800,
 };
-
 const timerDisplayStyle: CSSProperties = {
   fontSize: "36px",
   fontWeight: 900,
@@ -1110,14 +1112,12 @@ const timerDisplayStyle: CSSProperties = {
   marginBottom: "16px",
   letterSpacing: "0.04em",
 };
-
 const inputGridStyle: CSSProperties = {
   display: "flex",
   gap: "10px",
   flexWrap: "wrap",
   marginTop: "12px",
 };
-
 const inputStyle: CSSProperties = {
   padding: "10px",
   borderRadius: "10px",
@@ -1126,7 +1126,6 @@ const inputStyle: CSSProperties = {
   color: "white",
   minWidth: "140px",
 };
-
 const smallInputStyle: CSSProperties = {
   padding: "10px",
   borderRadius: "10px",
@@ -1135,7 +1134,6 @@ const smallInputStyle: CSSProperties = {
   color: "white",
   minWidth: "90px",
 };
-
 const selectStyle: CSSProperties = {
   padding: "10px",
   borderRadius: "10px",
@@ -1144,13 +1142,11 @@ const selectStyle: CSSProperties = {
   color: "white",
   minWidth: "180px",
 };
-
 const buttonRowStyle: CSSProperties = {
   display: "flex",
   gap: "8px",
   flexWrap: "wrap",
 };
-
 const primaryButtonStyle: CSSProperties = {
   backgroundColor: "#ff1a1a",
   border: "none",
@@ -1160,7 +1156,6 @@ const primaryButtonStyle: CSSProperties = {
   fontWeight: 700,
   cursor: "pointer",
 };
-
 const secondaryButtonStyle: CSSProperties = {
   backgroundColor: "#2a2a2a",
   border: "1px solid #3a3a3a",
@@ -1170,7 +1165,6 @@ const secondaryButtonStyle: CSSProperties = {
   fontWeight: 700,
   cursor: "pointer",
 };
-
 const dangerButtonStyle: CSSProperties = {
   backgroundColor: "#661111",
   border: "1px solid #772222",
@@ -1180,7 +1174,6 @@ const dangerButtonStyle: CSSProperties = {
   fontWeight: 700,
   cursor: "pointer",
 };
-
 const completeButtonStyle: CSSProperties = {
   backgroundColor: "#1f3b2d",
   border: "1px solid #2f5a43",
@@ -1190,7 +1183,6 @@ const completeButtonStyle: CSSProperties = {
   fontWeight: 700,
   cursor: "pointer",
 };
-
 const completeButtonActiveStyle: CSSProperties = {
   backgroundColor: "#28a745",
   border: "1px solid #34c759",
@@ -1200,7 +1192,6 @@ const completeButtonActiveStyle: CSSProperties = {
   fontWeight: 800,
   cursor: "pointer",
 };
-
 const navButtonPrimary: CSSProperties = {
   backgroundColor: "#ff1a1a",
   color: "white",
@@ -1209,7 +1200,6 @@ const navButtonPrimary: CSSProperties = {
   textDecoration: "none",
   fontWeight: 700,
 };
-
 const navButtonSecondary: CSSProperties = {
   backgroundColor: "#222",
   color: "white",
@@ -1218,7 +1208,6 @@ const navButtonSecondary: CSSProperties = {
   textDecoration: "none",
   fontWeight: 700,
 };
-
 const exerciseTopRowStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
@@ -1226,24 +1215,20 @@ const exerciseTopRowStyle: CSSProperties = {
   gap: "12px",
   flexWrap: "wrap",
 };
-
 const exerciseTitleStyle: CSSProperties = {
   color: "#ff4d4d",
   margin: "0 0 4px",
   fontSize: "22px",
   fontWeight: 800,
 };
-
 const exerciseBodyPartStyle: CSSProperties = {
   color: "#999",
   margin: 0,
 };
-
 const setsHeaderStyle: CSSProperties = {
   marginBottom: "10px",
   color: "#ffffff",
 };
-
 const editableSetRowStyle: CSSProperties = {
   marginTop: "10px",
   color: "#ddd",
@@ -1254,7 +1239,6 @@ const editableSetRowStyle: CSSProperties = {
   padding: "10px 0",
   borderBottom: "1px solid #222",
 };
-
 const setRowStyle: CSSProperties = {
   marginTop: "8px",
   color: "#ddd",
@@ -1266,19 +1250,16 @@ const setRowStyle: CSSProperties = {
   padding: "10px 0",
   borderBottom: "1px solid #222",
 };
-
 const setNumberStyle: CSSProperties = {
   minWidth: "60px",
   color: "#efefef",
   fontWeight: 700,
 };
-
 const chipWrapStyle: CSSProperties = {
   display: "flex",
   gap: "8px",
   flexWrap: "wrap",
 };
-
 const chipButtonStyle: CSSProperties = {
   backgroundColor: "#1d1d1d",
   border: "1px solid #333",
@@ -1287,29 +1268,24 @@ const chipButtonStyle: CSSProperties = {
   borderRadius: "999px",
   cursor: "pointer",
 };
-
 const subtleLabelStyle: CSSProperties = {
   color: "#a8a8a8",
   fontSize: "13px",
   marginBottom: "8px",
 };
-
 const mutedStyle: CSSProperties = {
   color: "#999",
 };
-
 const statusStyle: CSSProperties = {
   color: "#cccccc",
   marginBottom: "16px",
 };
-
 const helperTextStyle: CSSProperties = {
   color: "#8f8f8f",
   fontSize: "13px",
   marginTop: "12px",
   marginBottom: 0,
 };
-
 const finishButtonStyle: CSSProperties = {
   width: "100%",
   backgroundColor: "#ff1a1a",
@@ -1321,19 +1297,16 @@ const finishButtonStyle: CSSProperties = {
   fontSize: "16px",
   cursor: "pointer",
 };
-
 const listStyle: CSSProperties = {
   display: "grid",
   gap: "10px",
 };
-
 const listItemStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: "12px",
   color: "#efefef",
 };
-
 const listLineStyle: CSSProperties = {
   width: "10px",
   height: "2px",

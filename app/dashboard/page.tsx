@@ -1,14 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 type Profile = {
+  id?: number;
+  user_id?: string | null;
   name: string | null;
 };
 
 type Workout = {
   id: number;
+  user_id?: string | null;
   workout_name: string | null;
   created_at: string;
   duration_seconds?: number | null;
@@ -18,6 +22,7 @@ type Workout = {
 
 type WorkoutSet = {
   id: number;
+  user_id?: string | null;
   workout_id: number;
   exercise_name: string | null;
   set_number: number | null;
@@ -39,11 +44,20 @@ type PersonalizedLiftCard = {
   totalVolume: number;
 };
 
+type AuthUser = {
+  id: string;
+  email?: string;
+};
+
 export default function DashboardPage() {
+  const router = useRouter();
+
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [sets, setSets] = useState<WorkoutSet[]>([]);
   const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState("");
 
   useEffect(() => {
     void loadDashboard();
@@ -51,33 +65,75 @@ export default function DashboardPage() {
 
   async function loadDashboard() {
     setLoading(true);
+    setStatus("Checking account...");
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError) {
+      console.error("Get user error:", userError);
+      setStatus(`Error: ${userError.message}`);
+      setLoading(false);
+      return;
+    }
+
+    if (!user) {
+      router.replace("/login");
+      return;
+    }
+
+    setAuthUser({
+      id: user.id,
+      email: user.email,
+    });
+
+    setStatus("Loading your dashboard...");
 
     const [
       { data: profileData, error: profileError },
       { data: workoutsData, error: workoutsError },
       { data: setsData, error: setsError },
     ] = await Promise.all([
-      supabase.from("profiles").select("name").maybeSingle(),
-      supabase.from("workouts").select("*").order("created_at", { ascending: false }),
-      supabase.from("workout_sets").select("*").order("created_at", { ascending: false }),
+      supabase
+        .from("profiles")
+        .select("id, user_id, name")
+        .eq("user_id", user.id)
+        .maybeSingle(),
+      supabase
+        .from("workouts")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("workout_sets")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false }),
     ]);
 
-    if (profileError) {
-      console.error("Profile load error:", profileError);
-    }
-
-    if (workoutsError) {
-      console.error("Workout load error:", workoutsError);
-    }
-
-    if (setsError) {
-      console.error("Set load error:", setsError);
-    }
+    if (profileError) console.error("Profile load error:", profileError);
+    if (workoutsError) console.error("Workout load error:", workoutsError);
+    if (setsError) console.error("Set load error:", setsError);
 
     setProfile((profileData as Profile) ?? null);
     setWorkouts((workoutsData as Workout[]) ?? []);
     setSets((setsData as WorkoutSet[]) ?? []);
+    setStatus("");
     setLoading(false);
+  }
+
+  async function handleSignOut() {
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      console.error("Sign out error:", error);
+      setStatus(`Error signing out: ${error.message}`);
+      return;
+    }
+
+    router.replace("/login");
   }
 
   function toNumber(value: string | number | null | undefined) {
@@ -104,9 +160,7 @@ export default function DashboardPage() {
 
   const workoutsById = useMemo(() => {
     const map = new Map<number, Workout>();
-    for (const workout of workouts) {
-      map.set(workout.id, workout);
-    }
+    for (const workout of workouts) map.set(workout.id, workout);
     return map;
   }, [workouts]);
 
@@ -135,9 +189,7 @@ export default function DashboardPage() {
 
     for (const workout of trainingWorkouts) {
       const key = startOfDay(workout.created_at).toISOString();
-      if (!map.has(key)) {
-        map.set(key, { count: 0, volume: 0 });
-      }
+      if (!map.has(key)) map.set(key, { count: 0, volume: 0 });
       map.get(key)!.count += 1;
     }
 
@@ -148,10 +200,7 @@ export default function DashboardPage() {
       const key = startOfDay(workout.created_at).toISOString();
       const volume = toNumber(set.weight) * toNumber(set.reps);
 
-      if (!map.has(key)) {
-        map.set(key, { count: 0, volume: 0 });
-      }
-
+      if (!map.has(key)) map.set(key, { count: 0, volume: 0 });
       map.get(key)!.volume += volume;
     }
 
@@ -194,8 +243,7 @@ export default function DashboardPage() {
     for (let i = 1; i < days.length; i += 1) {
       const prev = startOfDay(days[i - 1]);
       const curr = startOfDay(days[i]);
-      const diff =
-        (curr.getTime() - prev.getTime()) / (1000 * 60 * 60 * 24);
+      const diff = (curr.getTime() - prev.getTime()) / (1000 * 60 * 60 * 24);
 
       if (diff === 1) {
         current += 1;
@@ -377,11 +425,10 @@ export default function DashboardPage() {
       map.get(key)!.sets.push(set);
     }
 
-    const cards = Array.from(map.values())
+    return Array.from(map.values())
       .map((item) => {
         const sortedByDateDesc = [...item.sets].sort(
-          (a, b) =>
-            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         );
 
         const bestSet = [...item.sets].sort((a, b) => {
@@ -412,14 +459,8 @@ export default function DashboardPage() {
         };
       })
       .filter((item) => item.timesLogged >= 3)
-      .sort((a, b) => {
-        const scoreA = a.timesLogged * 1000 + a.totalVolume;
-        const scoreB = b.timesLogged * 1000 + b.totalVolume;
-        return scoreB - scoreA;
-      })
+      .sort((a, b) => (b.timesLogged * 1000 + b.totalVolume) - (a.timesLogged * 1000 + a.totalVolume))
       .slice(0, 4);
-
-    return cards;
   }, [completedSets]);
 
   const bodyPartSummary = useMemo(() => {
@@ -446,8 +487,7 @@ export default function DashboardPage() {
     if (completedSets.length === 0) return "Not enough data";
 
     const avgReps = Math.round(
-      completedSets.reduce((sum, set) => sum + toNumber(set.reps), 0) /
-        completedSets.length
+      completedSets.reduce((sum, set) => sum + toNumber(set.reps), 0) / completedSets.length
     );
 
     if (avgReps <= 6) return "Strength biased";
@@ -461,10 +501,7 @@ export default function DashboardPage() {
     const volumeByWorkout = trainingWorkouts.map((workout) => {
       const workoutVolume = completedSets
         .filter((set) => set.workout_id === workout.id)
-        .reduce(
-          (sum, set) => sum + toNumber(set.weight) * toNumber(set.reps),
-          0
-        );
+        .reduce((sum, set) => sum + toNumber(set.weight) * toNumber(set.reps), 0);
 
       return {
         workoutName: workout.workout_name ?? "Workout",
@@ -476,9 +513,7 @@ export default function DashboardPage() {
     if (bestVolumeWorkout?.volume) {
       items.push({
         title: "🔥 Best Workout Volume",
-        detail: `${bestVolumeWorkout.workoutName} • ${Math.round(
-          bestVolumeWorkout.volume
-        ).toLocaleString()} total volume`,
+        detail: `${bestVolumeWorkout.workoutName} • ${Math.round(bestVolumeWorkout.volume).toLocaleString()} total volume`,
         value: bestVolumeWorkout.volume,
       });
     }
@@ -486,7 +521,7 @@ export default function DashboardPage() {
     const topLift = personalizedMainLifts[0];
     if (topLift) {
       items.push({
-        title: `🏆 Main Lift Leader`,
+        title: "🏆 Main Lift Leader",
         detail: `${topLift.name} • best ${topLift.bestSetWeight} × ${topLift.bestSetReps}`,
         value: topLift.bestE1RM,
       });
@@ -524,7 +559,7 @@ export default function DashboardPage() {
         <section style={heroCardStyle}>
           <p style={eyebrowStyle}>RESPAWN DASHBOARD</p>
           <h1 style={heroTitleStyle}>Loading dashboard...</h1>
-          <p style={heroSubStyle}>Pulling your latest training data.</p>
+          <p style={heroSubStyle}>Checking your session and loading your data.</p>
         </section>
       </main>
     );
@@ -540,6 +575,17 @@ export default function DashboardPage() {
         <p style={heroSubStyle}>
           Show up, build consistency, then let strength data stack over time.
         </p>
+
+        <div style={accountBarStyle}>
+          <div style={accountInfoStyle}>
+            <span style={accountLabelStyle}>Signed in as</span>
+            <span style={accountValueStyle}>{authUser?.email || authUser?.id}</span>
+          </div>
+
+          <button onClick={handleSignOut} style={secondaryButtonStyle}>
+            Sign Out
+          </button>
+        </div>
 
         <div style={heroStatsRowStyle}>
           <div style={heroStatBoxStyle}>
@@ -561,15 +607,7 @@ export default function DashboardPage() {
         </div>
 
         <p style={heroInsightStyle}>
-          Momentum:{" "}
-          <span style={heroInsightValueStyle}>
-            {momentum.mode}
-            {momentum.mode === "Beast"
-              ? " 🔥"
-              : momentum.mode === "Strong"
-              ? " ⚡"
-              : ""}
-          </span>
+          Momentum: <span style={heroInsightValueStyle}>{momentum.mode}</span>
           {" • "}
           {momentum.volumeDeltaPct >= 0 ? "+" : ""}
           {momentum.volumeDeltaPct}% volume vs last week
@@ -611,11 +649,7 @@ export default function DashboardPage() {
                 <div
                   style={{
                     ...heatmapCellStyle,
-                    background: !day.active
-                      ? "#1b1b1b"
-                      : day.intense
-                      ? "#ff4d4d"
-                      : "#4caf50",
+                    background: !day.active ? "#1b1b1b" : day.intense ? "#ff4d4d" : "#4caf50",
                   }}
                 />
                 <span style={heatmapLabelStyle}>{day.label}</span>
@@ -651,8 +685,7 @@ export default function DashboardPage() {
           </div>
 
           <p style={cardFootnoteStyle}>
-            The dashboard prioritizes consistency first, then personal lift trends
-            once enough data exists.
+            The dashboard prioritizes consistency first, then personal lift trends once enough data exists.
           </p>
         </section>
       </section>
@@ -671,9 +704,7 @@ export default function DashboardPage() {
                     <div style={personalizedLiftNameStyle}>{lift.name}</div>
                     <div style={personalizedLiftBodyPartStyle}>{lift.bodyPart}</div>
                   </div>
-                  <div style={personalizedLiftCountStyle}>
-                    {lift.timesLogged} logs
-                  </div>
+                  <div style={personalizedLiftCountStyle}>{lift.timesLogged} logs</div>
                 </div>
 
                 <div style={personalizedLiftBestStyle}>
@@ -693,9 +724,7 @@ export default function DashboardPage() {
           </div>
         ) : (
           <p style={mutedStyle}>
-            Log a few repeated lifts and this section will automatically swap in your
-            actual main movements, like dumbbell bench, RDLs, leg press, rows, or
-            whatever you use most.
+            Log a few repeated lifts and this section will automatically swap in your actual main movements.
           </p>
         )}
       </section>
@@ -742,6 +771,8 @@ export default function DashboardPage() {
           )}
         </section>
       </section>
+
+      {status && <p style={statusStyle}>{status}</p>}
     </main>
   );
 }
@@ -753,17 +784,14 @@ const pageStyle: CSSProperties = {
   padding: "28px 20px 120px",
   fontFamily: "sans-serif",
 };
-
 const heroCardStyle: CSSProperties = {
-  background:
-    "linear-gradient(135deg, rgba(255,26,26,0.16) 0%, rgba(18,18,18,1) 55%, rgba(10,10,10,1) 100%)",
+  background: "linear-gradient(135deg, rgba(255,26,26,0.16) 0%, rgba(18,18,18,1) 55%, rgba(10,10,10,1) 100%)",
   border: "1px solid rgba(255,255,255,0.08)",
   borderRadius: "24px",
   padding: "24px",
   marginBottom: "18px",
   boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
 };
-
 const eyebrowStyle: CSSProperties = {
   color: "#ff6b6b",
   fontSize: "12px",
@@ -771,7 +799,6 @@ const eyebrowStyle: CSSProperties = {
   letterSpacing: "0.14em",
   margin: "0 0 10px",
 };
-
 const heroTitleStyle: CSSProperties = {
   color: "#ffffff",
   fontSize: "30px",
@@ -779,20 +806,40 @@ const heroTitleStyle: CSSProperties = {
   fontWeight: 800,
   margin: "0 0 8px",
 };
-
 const heroSubStyle: CSSProperties = {
   color: "#d0d0d0",
   fontSize: "15px",
   margin: 0,
 };
-
+const accountBarStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "12px",
+  marginTop: "18px",
+  marginBottom: "8px",
+  flexWrap: "wrap",
+};
+const accountInfoStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "4px",
+};
+const accountLabelStyle: CSSProperties = {
+  color: "#a9a9a9",
+  fontSize: "12px",
+};
+const accountValueStyle: CSSProperties = {
+  color: "#ffffff",
+  fontWeight: 700,
+  fontSize: "14px",
+};
 const heroStatsRowStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
   gap: "10px",
   marginTop: "20px",
 };
-
 const heroStatBoxStyle: CSSProperties = {
   background: "rgba(255,255,255,0.04)",
   border: "1px solid rgba(255,255,255,0.06)",
@@ -802,30 +849,25 @@ const heroStatBoxStyle: CSSProperties = {
   flexDirection: "column",
   gap: "6px",
 };
-
 const heroStatLabelStyle: CSSProperties = {
   color: "#aaaaaa",
   fontSize: "12px",
 };
-
 const heroStatValueStyle: CSSProperties = {
   color: "#ffffff",
   fontSize: "24px",
   fontWeight: 900,
 };
-
 const heroInsightStyle: CSSProperties = {
   color: "#efefef",
   fontSize: "14px",
   margin: "18px 0 0",
   fontWeight: 600,
 };
-
 const heroInsightValueStyle: CSSProperties = {
   color: "#ffffff",
   fontWeight: 900,
 };
-
 const cardStyle: CSSProperties = {
   background: "#121212",
   border: "1px solid #222",
@@ -834,7 +876,6 @@ const cardStyle: CSSProperties = {
   boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
   marginBottom: "16px",
 };
-
 const sectionHeaderStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
@@ -842,27 +883,23 @@ const sectionHeaderStyle: CSSProperties = {
   gap: "12px",
   marginBottom: "12px",
 };
-
 const sectionTitle: CSSProperties = {
   color: "#ff4d4d",
   margin: 0,
   fontSize: "18px",
   fontWeight: 800,
 };
-
 const twoColGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
   gap: "16px",
 };
-
 const miniStatGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
   gap: "10px",
   marginBottom: "18px",
 };
-
 const miniStatBoxStyle: CSSProperties = {
   background: "#171717",
   border: "1px solid #252525",
@@ -872,38 +909,32 @@ const miniStatBoxStyle: CSSProperties = {
   flexDirection: "column",
   gap: "6px",
 };
-
 const miniStatLabelStyle: CSSProperties = {
   color: "#a9a9a9",
   fontSize: "12px",
 };
-
 const miniStatValueStyle: CSSProperties = {
   color: "#fff",
   fontWeight: 900,
   fontSize: "18px",
 };
-
 const miniStatValueStyleSmall: CSSProperties = {
   color: "#fff",
   fontWeight: 800,
   fontSize: "14px",
   lineHeight: 1.35,
 };
-
 const heatmapGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(14, minmax(0, 1fr))",
   gap: "8px",
 };
-
 const heatmapDayWrapStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   alignItems: "center",
   gap: "6px",
 };
-
 const heatmapCellStyle: CSSProperties = {
   width: "100%",
   aspectRatio: "1 / 1",
@@ -911,26 +942,21 @@ const heatmapCellStyle: CSSProperties = {
   borderRadius: "8px",
   border: "1px solid rgba(255,255,255,0.06)",
 };
-
 const heatmapLabelStyle: CSSProperties = {
   color: "#7f7f7f",
   fontSize: "10px",
 };
-
 const personalizedLiftGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
   gap: "12px",
 };
-
 const personalizedLiftCardStyle: CSSProperties = {
-  background:
-    "linear-gradient(135deg, rgba(255,26,26,0.08), rgba(255,255,255,0.02))",
+  background: "linear-gradient(135deg, rgba(255,26,26,0.08), rgba(255,255,255,0.02))",
   border: "1px solid rgba(255,255,255,0.06)",
   borderRadius: "16px",
   padding: "16px",
 };
-
 const personalizedLiftTopRowStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
@@ -938,95 +964,95 @@ const personalizedLiftTopRowStyle: CSSProperties = {
   gap: "10px",
   marginBottom: "10px",
 };
-
 const personalizedLiftNameStyle: CSSProperties = {
   color: "#fff",
   fontSize: "16px",
   fontWeight: 800,
 };
-
 const personalizedLiftBodyPartStyle: CSSProperties = {
   color: "#a8a8a8",
   fontSize: "12px",
   marginTop: "4px",
 };
-
 const personalizedLiftCountStyle: CSSProperties = {
   color: "#ff8b8b",
   fontSize: "12px",
   fontWeight: 800,
   whiteSpace: "nowrap",
 };
-
 const personalizedLiftBestStyle: CSSProperties = {
   color: "#fff",
   fontSize: "20px",
   fontWeight: 900,
   marginBottom: "8px",
 };
-
 const personalizedLiftSubStyle: CSSProperties = {
   color: "#c7c7c7",
   fontSize: "13px",
   marginTop: "6px",
 };
-
 const bodyPartGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
   gap: "10px",
 };
-
 const bodyPartCardStyle: CSSProperties = {
   background: "#171717",
   border: "1px solid #252525",
   borderRadius: "16px",
   padding: "14px",
 };
-
 const bodyPartNameStyle: CSSProperties = {
   color: "#fff",
   fontWeight: 800,
   fontSize: "15px",
 };
-
 const bodyPartSubStyle: CSSProperties = {
   color: "#b8b8b8",
   fontSize: "13px",
   marginTop: "6px",
 };
-
 const feedListStyle: CSSProperties = {
   display: "grid",
   gap: "12px",
 };
-
 const feedCardStyle: CSSProperties = {
   background: "#171717",
   border: "1px solid #252525",
   borderRadius: "16px",
   padding: "14px",
 };
-
 const feedTitleStyle: CSSProperties = {
   color: "#fff",
   fontWeight: 800,
   fontSize: "15px",
 };
-
 const feedDetailStyle: CSSProperties = {
   color: "#bbbbbb",
   fontSize: "13px",
   marginTop: "6px",
 };
-
 const cardFootnoteStyle: CSSProperties = {
   color: "#8d8d8d",
   fontSize: "12px",
   marginTop: "14px",
 };
-
 const mutedStyle: CSSProperties = {
   color: "#a5a5a5",
   margin: "6px 0",
+};
+const secondaryButtonStyle: CSSProperties = {
+  backgroundColor: "#222",
+  border: "1px solid #333",
+  padding: "12px 16px",
+  borderRadius: "10px",
+  color: "white",
+  fontWeight: 700,
+  fontSize: "14px",
+  cursor: "pointer",
+};
+const statusStyle: CSSProperties = {
+  marginTop: "18px",
+  marginBottom: "18px",
+  color: "#cccccc",
 };

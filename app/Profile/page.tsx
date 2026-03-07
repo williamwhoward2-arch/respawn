@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState, type CSSProperties } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
 type ProfileRow = {
   id: number;
+  user_id: string | null;
   name: string | null;
   sex: string | null;
   height: string | null;
@@ -14,9 +16,18 @@ type ProfileRow = {
   focus: string | null;
   experience_level: string | null;
   equipment_access: string | null;
+  age?: number | null;
+};
+
+type AuthUser = {
+  id: string;
+  email?: string;
 };
 
 export default function ProfilePage() {
+  const router = useRouter();
+
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [profileId, setProfileId] = useState<number | null>(null);
 
   const [name, setName] = useState("");
@@ -35,27 +46,62 @@ export default function ProfilePage() {
   const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
-    loadLatestProfile();
+    void initializeProfilePage();
   }, []);
 
-  async function loadLatestProfile() {
+  async function initializeProfilePage() {
     setLoading(true);
-    setStatus("Loading profile...");
+    setStatus("Checking account...");
 
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(1);
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
 
-    if (error) {
-      console.error("Load profile error:", error);
-      setStatus(`Error: ${error.message}`);
+    if (userError) {
+      console.error("Get user error:", userError);
+      setStatus(`Error: ${userError.message}`);
       setLoading(false);
       return;
     }
 
-    const profile = data?.[0] as ProfileRow | undefined;
+    if (!user) {
+      router.replace("/login");
+      return;
+    }
+
+    setAuthUser({
+      id: user.id,
+      email: user.email,
+    });
+
+    await loadUserProfile(user.id);
+    setLoading(false);
+  }
+
+  async function loadUserProfile(userId?: string) {
+    const activeUserId = userId || authUser?.id;
+
+    if (!activeUserId) {
+      setStatus("No signed-in user found.");
+      return;
+    }
+
+    setStatus("Loading your profile...");
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("user_id", activeUserId)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Load profile error:", error);
+      setStatus(`Error: ${error.message}`);
+      return;
+    }
+
+    const profile = data as ProfileRow | null;
 
     if (profile) {
       setProfileId(profile.id);
@@ -69,13 +115,11 @@ export default function ProfilePage() {
       setExperienceLevel(profile.experience_level || "");
       setEquipmentAccess(profile.equipment_access || "");
       setSaved(true);
-      setStatus("Latest profile loaded.");
+      setStatus("Your profile loaded.");
     } else {
       resetFormState();
-      setStatus("No saved profile found. Create one below.");
+      setStatus("No profile found for this account. Create one below.");
     }
-
-    setLoading(false);
   }
 
   function resetFormState() {
@@ -94,23 +138,29 @@ export default function ProfilePage() {
 
   function clearFormOnly() {
     resetFormState();
-    setStatus("Form cleared. No saved history was deleted.");
+    setStatus("Form cleared. Your saved profile is still in Supabase until you save again.");
   }
 
   async function saveProfile() {
-    setStatus(profileId ? "Updating profile..." : "Saving profile...");
+    if (!authUser?.id) {
+      setStatus("You must be signed in to save your profile.");
+      return;
+    }
+
+    setStatus(profileId ? "Updating your profile..." : "Saving your profile...");
     setSaved(false);
 
     const payload = {
-      name,
-      sex,
-      height,
-      bodyweight,
-      waist,
-      goal,
-      focus,
-      experience_level: experienceLevel,
-      equipment_access: equipmentAccess,
+      user_id: authUser.id,
+      name: name || null,
+      sex: sex || null,
+      height: height || null,
+      bodyweight: bodyweight || null,
+      waist: waist || null,
+      goal: goal || null,
+      focus: focus || null,
+      experience_level: experienceLevel || null,
+      equipment_access: equipmentAccess || null,
     };
 
     if (profileId) {
@@ -118,7 +168,9 @@ export default function ProfilePage() {
         .from("profiles")
         .update(payload)
         .eq("id", profileId)
-        .select();
+        .eq("user_id", authUser.id)
+        .select()
+        .single();
 
       if (error) {
         console.error("Update profile error:", error);
@@ -126,7 +178,8 @@ export default function ProfilePage() {
         return;
       }
 
-      console.log("Updated profile row:", data);
+      const updated = data as ProfileRow;
+      setProfileId(updated.id);
       setSaved(true);
       setStatus("Profile updated successfully.");
       return;
@@ -134,8 +187,9 @@ export default function ProfilePage() {
 
     const { data, error } = await supabase
       .from("profiles")
-      .insert([payload])
-      .select();
+      .insert(payload)
+      .select()
+      .single();
 
     if (error) {
       console.error("Insert profile error:", error);
@@ -143,34 +197,34 @@ export default function ProfilePage() {
       return;
     }
 
-    const inserted = data?.[0] as ProfileRow | undefined;
-    if (inserted?.id) {
-      setProfileId(inserted.id);
-    }
-
-    console.log("Inserted profile row:", data);
+    const inserted = data as ProfileRow;
+    setProfileId(inserted.id);
     setSaved(true);
-    setStatus("Profile saved to Supabase.");
+    setStatus("Profile saved successfully.");
   }
 
   async function handleResetAccount() {
+    if (!authUser?.id) {
+      setStatus("You must be signed in to reset your account.");
+      return;
+    }
+
     const confirmed = window.confirm(
-      "This will permanently delete your profile, workouts, workout sets, and local app data. Do you want to continue?"
+      "This will permanently delete only your profile, workouts, workout sets, and local app data on this device. Do you want to continue?"
     );
 
     if (!confirmed) return;
 
     setResetting(true);
-    setStatus("Resetting account...");
+    setStatus("Resetting your account...");
 
     try {
       const { error: setsError } = await supabase
         .from("workout_sets")
         .delete()
-        .gt("id", 0);
+        .eq("user_id", authUser.id);
 
       if (setsError) {
-        console.error("Error deleting workout sets:", setsError);
         setStatus(`Error clearing workout sets: ${setsError.message}`);
         setResetting(false);
         return;
@@ -179,10 +233,9 @@ export default function ProfilePage() {
       const { error: workoutsError } = await supabase
         .from("workouts")
         .delete()
-        .gt("id", 0);
+        .eq("user_id", authUser.id);
 
       if (workoutsError) {
-        console.error("Error deleting workouts:", workoutsError);
         setStatus(`Error clearing workouts: ${workoutsError.message}`);
         setResetting(false);
         return;
@@ -191,11 +244,10 @@ export default function ProfilePage() {
       const { error: profilesError } = await supabase
         .from("profiles")
         .delete()
-        .gt("id", 0);
+        .eq("user_id", authUser.id);
 
       if (profilesError) {
-        console.error("Error deleting profiles:", profilesError);
-        setStatus(`Error clearing profiles: ${profilesError.message}`);
+        setStatus(`Error clearing profile: ${profilesError.message}`);
         setResetting(false);
         return;
       }
@@ -205,8 +257,8 @@ export default function ProfilePage() {
       localStorage.removeItem("respawn_generated_workout");
 
       resetFormState();
-      setStatus("Account reset successfully.");
-
+      setStatus("Your account data was reset successfully.");
+      setResetting(false);
       window.location.reload();
     } catch (error) {
       console.error("Reset account failed:", error);
@@ -215,9 +267,21 @@ export default function ProfilePage() {
     }
   }
 
+  async function handleSignOut() {
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      setStatus(`Error signing out: ${error.message}`);
+      return;
+    }
+
+    router.replace("/login");
+  }
+
   function testSupabaseConnection() {
     console.log("Supabase client:", supabase);
-    alert("Supabase client loaded. Check the browser console too.");
+    console.log("Current auth user:", authUser);
+    alert("Supabase client loaded. Check browser console.");
   }
 
   if (loading) {
@@ -226,7 +290,7 @@ export default function ProfilePage() {
         <section style={heroCardStyle}>
           <p style={eyebrowStyle}>RESPAWN PROFILE</p>
           <h1 style={heroTitleStyle}>Loading your profile...</h1>
-          <p style={heroSubStyle}>Pulling your current settings and goals.</p>
+          <p style={heroSubStyle}>Pulling your current account and profile settings.</p>
         </section>
       </main>
     );
@@ -240,7 +304,7 @@ export default function ProfilePage() {
           {name ? `${name}'s Profile` : "Build Your Profile"}
         </h1>
         <p style={heroSubStyle}>
-          Update your stats, goal, experience, and available equipment without losing progress history.
+          Update your stats, goal, experience, and available equipment without losing your progress history.
         </p>
 
         <div style={heroStatsRow}>
@@ -259,6 +323,17 @@ export default function ProfilePage() {
             </div>
           </div>
         </div>
+
+        <div style={accountBarStyle}>
+          <div style={accountInfoStyle}>
+            <span style={accountLabelStyle}>Signed in as</span>
+            <span style={accountValueStyle}>{authUser?.email || authUser?.id || "Not signed in"}</span>
+          </div>
+
+          <button onClick={handleSignOut} style={secondaryButtonStyle}>
+            Sign Out
+          </button>
+        </div>
       </section>
 
       <section style={cardStyle}>
@@ -269,12 +344,7 @@ export default function ProfilePage() {
         <div style={formGridStyle}>
           <label style={fieldStyle}>
             <span style={labelStyle}>Name</span>
-            <input
-              placeholder="Your name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              style={inputStyle}
-            />
+            <input placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} />
           </label>
 
           <label style={fieldStyle}>
@@ -340,11 +410,7 @@ export default function ProfilePage() {
 
           <label style={fieldStyle}>
             <span style={labelStyle}>Experience level</span>
-            <select
-              value={experienceLevel}
-              onChange={(e) => setExperienceLevel(e.target.value)}
-              style={inputStyle}
-            >
+            <select value={experienceLevel} onChange={(e) => setExperienceLevel(e.target.value)} style={inputStyle}>
               <option value="">Select</option>
               <option value="beginner">Beginner</option>
               <option value="intermediate">Intermediate</option>
@@ -354,11 +420,7 @@ export default function ProfilePage() {
 
           <label style={fieldStyle}>
             <span style={labelStyle}>Equipment access</span>
-            <select
-              value={equipmentAccess}
-              onChange={(e) => setEquipmentAccess(e.target.value)}
-              style={inputStyle}
-            >
+            <select value={equipmentAccess} onChange={(e) => setEquipmentAccess(e.target.value)} style={inputStyle}>
               <option value="">Select</option>
               <option value="full_gym">Full gym</option>
               <option value="dumbbells_only">Dumbbells only</option>
@@ -385,8 +447,8 @@ export default function ProfilePage() {
             Clear Form Only
           </button>
 
-          <button onClick={loadLatestProfile} style={secondaryButtonStyle}>
-            Reload Latest Profile
+          <button onClick={() => loadUserProfile()} style={secondaryButtonStyle}>
+            Reload My Profile
           </button>
 
           <button onClick={testSupabaseConnection} style={secondaryButtonStyle}>
@@ -401,15 +463,11 @@ export default function ProfilePage() {
         </div>
 
         <p style={dangerTextStyle}>
-          Resetting your account will permanently delete your saved profile, workouts, completed sets,
-          and local app data so you can start fresh.
+          Resetting your account will permanently delete your saved profile, workouts,
+          completed sets, and local app data so you can start fresh.
         </p>
 
-        <button
-          onClick={handleResetAccount}
-          style={resetButtonStyle}
-          disabled={resetting}
-        >
+        <button onClick={handleResetAccount} style={resetButtonStyle} disabled={resetting}>
           {resetting ? "Resetting Account..." : "Reset Account"}
         </button>
       </section>
@@ -427,39 +485,30 @@ export default function ProfilePage() {
               <span style={summaryLabelStyle}>Name</span>
               <span style={summaryValueStyle}>{name || "--"}</span>
             </div>
-
             <div style={summaryCardStyle}>
               <span style={summaryLabelStyle}>Goal</span>
               <span style={summaryValueStyle}>{goal || "--"}</span>
             </div>
-
             <div style={summaryCardStyle}>
               <span style={summaryLabelStyle}>Focus</span>
               <span style={summaryValueStyle}>{focus || "--"}</span>
             </div>
-
             <div style={summaryCardStyle}>
               <span style={summaryLabelStyle}>Experience</span>
               <span style={summaryValueStyle}>{experienceLevel || "--"}</span>
             </div>
-
             <div style={summaryCardStyle}>
               <span style={summaryLabelStyle}>Equipment</span>
-              <span style={summaryValueStyle}>
-                {formatEquipmentLabel(equipmentAccess) || "--"}
-              </span>
+              <span style={summaryValueStyle}>{formatEquipmentLabel(equipmentAccess) || "--"}</span>
             </div>
-
             <div style={summaryCardStyle}>
               <span style={summaryLabelStyle}>Bodyweight</span>
               <span style={summaryValueStyle}>{bodyweight || "--"}</span>
             </div>
-
             <div style={summaryCardStyle}>
               <span style={summaryLabelStyle}>Waist</span>
               <span style={summaryValueStyle}>{waist || "--"}</span>
             </div>
-
             <div style={summaryCardStyle}>
               <span style={summaryLabelStyle}>Profile ID</span>
               <span style={summaryValueStyle}>{profileId ?? "--"}</span>
@@ -497,17 +546,14 @@ const pageStyle: CSSProperties = {
   padding: "28px 20px 120px",
   fontFamily: "sans-serif",
 };
-
 const heroCardStyle: CSSProperties = {
-  background:
-    "linear-gradient(135deg, rgba(255,26,26,0.18) 0%, rgba(20,20,20,1) 55%, rgba(10,10,10,1) 100%)",
+  background: "linear-gradient(135deg, rgba(255,26,26,0.18) 0%, rgba(20,20,20,1) 55%, rgba(10,10,10,1) 100%)",
   border: "1px solid rgba(255,255,255,0.08)",
   borderRadius: "24px",
   padding: "24px",
   marginBottom: "18px",
   boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
 };
-
 const eyebrowStyle: CSSProperties = {
   color: "#ff6b6b",
   fontSize: "12px",
@@ -515,7 +561,6 @@ const eyebrowStyle: CSSProperties = {
   letterSpacing: "0.14em",
   margin: "0 0 10px",
 };
-
 const heroTitleStyle: CSSProperties = {
   color: "#ffffff",
   fontSize: "30px",
@@ -523,39 +568,55 @@ const heroTitleStyle: CSSProperties = {
   fontWeight: 800,
   margin: "0 0 8px",
 };
-
 const heroSubStyle: CSSProperties = {
   color: "#d0d0d0",
   fontSize: "15px",
   margin: 0,
 };
-
 const heroStatsRow: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
   gap: "10px",
   marginTop: "20px",
 };
-
 const heroStatBox: CSSProperties = {
   background: "rgba(255,255,255,0.04)",
   border: "1px solid rgba(255,255,255,0.06)",
   borderRadius: "16px",
   padding: "14px 12px",
 };
-
 const heroStatLabel: CSSProperties = {
   color: "#aaa",
   fontSize: "12px",
   marginBottom: "6px",
 };
-
 const heroStatValueSmall: CSSProperties = {
   color: "#fff",
   fontSize: "16px",
   fontWeight: 800,
 };
-
+const accountBarStyle: CSSProperties = {
+  marginTop: "18px",
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "12px",
+  flexWrap: "wrap",
+};
+const accountInfoStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "4px",
+};
+const accountLabelStyle: CSSProperties = {
+  color: "#aaa",
+  fontSize: "12px",
+};
+const accountValueStyle: CSSProperties = {
+  color: "#fff",
+  fontSize: "14px",
+  fontWeight: 700,
+};
 const cardStyle: CSSProperties = {
   background: "#121212",
   border: "1px solid #222",
@@ -564,7 +625,6 @@ const cardStyle: CSSProperties = {
   boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
   marginBottom: "16px",
 };
-
 const dangerCardStyle: CSSProperties = {
   background: "linear-gradient(135deg, rgba(90,16,16,0.35), rgba(18,18,18,1))",
   border: "1px solid rgba(255,80,80,0.18)",
@@ -573,7 +633,6 @@ const dangerCardStyle: CSSProperties = {
   boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
   marginBottom: "16px",
 };
-
 const sectionHeaderStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
@@ -581,21 +640,18 @@ const sectionHeaderStyle: CSSProperties = {
   gap: "12px",
   marginBottom: "12px",
 };
-
 const sectionTitle: CSSProperties = {
   color: "#ff4d4d",
   margin: 0,
   fontSize: "18px",
   fontWeight: 800,
 };
-
 const dangerSectionTitle: CSSProperties = {
   color: "#ff7b7b",
   margin: 0,
   fontSize: "18px",
   fontWeight: 800,
 };
-
 const dangerTextStyle: CSSProperties = {
   color: "#d7bcbc",
   fontSize: "14px",
@@ -603,24 +659,20 @@ const dangerTextStyle: CSSProperties = {
   marginTop: 0,
   marginBottom: "16px",
 };
-
 const formGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
   gap: "14px",
 };
-
 const fieldStyle: CSSProperties = {
   display: "grid",
   gap: "6px",
 };
-
 const labelStyle: CSSProperties = {
   color: "#ff6b6b",
   fontSize: "13px",
   fontWeight: 700,
 };
-
 const inputStyle: CSSProperties = {
   width: "100%",
   padding: "12px",
@@ -630,13 +682,11 @@ const inputStyle: CSSProperties = {
   color: "white",
   fontSize: "15px",
 };
-
 const actionGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
   gap: "12px",
 };
-
 const primaryButtonStyle: CSSProperties = {
   backgroundColor: "#ff1a1a",
   border: "none",
@@ -647,7 +697,6 @@ const primaryButtonStyle: CSSProperties = {
   fontSize: "16px",
   cursor: "pointer",
 };
-
 const secondaryButtonStyle: CSSProperties = {
   backgroundColor: "#222",
   border: "1px solid #333",
@@ -658,7 +707,6 @@ const secondaryButtonStyle: CSSProperties = {
   fontSize: "16px",
   cursor: "pointer",
 };
-
 const resetButtonStyle: CSSProperties = {
   width: "100%",
   backgroundColor: "#5a1010",
@@ -670,19 +718,16 @@ const resetButtonStyle: CSSProperties = {
   fontSize: "15px",
   cursor: "pointer",
 };
-
 const statusStyle: CSSProperties = {
   marginTop: "18px",
   marginBottom: "18px",
   color: "#cccccc",
 };
-
 const summaryGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
   gap: "12px",
 };
-
 const summaryCardStyle: CSSProperties = {
   background: "linear-gradient(135deg, rgba(255,26,26,0.10), rgba(255,255,255,0.02))",
   border: "1px solid rgba(255,255,255,0.06)",
@@ -692,12 +737,10 @@ const summaryCardStyle: CSSProperties = {
   flexDirection: "column",
   gap: "8px",
 };
-
 const summaryLabelStyle: CSSProperties = {
   color: "#aaa",
   fontSize: "13px",
 };
-
 const summaryValueStyle: CSSProperties = {
   color: "#fff",
   fontSize: "22px",
