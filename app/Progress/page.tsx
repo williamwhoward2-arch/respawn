@@ -107,9 +107,7 @@ function formatMiles(miles: number): string {
 }
 
 function titleCase(value: string): string {
-  return value
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+  return value.replaceAll("_", " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function normalizeBodyPart(value: string | null | undefined): string {
@@ -270,6 +268,133 @@ function getWorkoutDisplayName(params: {
     name: `Logged Session • ${formatDateShort(workout.created_at)}`,
     autoNamed: true,
   };
+}
+
+function VolumeTrendChart({
+  data,
+}: {
+  data: { label: string; value: number; sets: number }[];
+}) {
+  if (!data.length) {
+    return <p style={mutedStyle}>Not enough workout data yet.</p>;
+  }
+
+  const maxValue = Math.max(...data.map((item) => item.value), 1);
+  const width = 100;
+  const height = 48;
+
+  const points = data
+    .map((item, index) => {
+      const x = data.length === 1 ? width / 2 : (index / (data.length - 1)) * width;
+      const y = height - (item.value / maxValue) * height;
+      return `${x},${y}`;
+    })
+    .join(" ");
+
+  return (
+    <div style={chartWrapStyle}>
+      <div style={chartHeaderMiniStyle}>
+        <div>
+          <div style={chartTitleStyle}>Recent Volume Trend</div>
+          <div style={chartSubtitleStyle}>Last {data.length} workouts</div>
+        </div>
+        <div style={chartBadgeGreenStyle}>Progression</div>
+      </div>
+
+      <div style={lineChartShellStyle}>
+        <svg viewBox="0 0 100 56" preserveAspectRatio="none" style={svgChartStyle}>
+          <defs>
+            <linearGradient id="volumeFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="rgba(34,197,94,0.40)" />
+              <stop offset="100%" stopColor="rgba(34,197,94,0.02)" />
+            </linearGradient>
+          </defs>
+
+          <polyline
+            fill="none"
+            stroke="rgba(34,197,94,0.95)"
+            strokeWidth="2.5"
+            points={points}
+          />
+
+          <polygon fill="url(#volumeFill)" points={`0,56 ${points} 100,56`} />
+
+          {data.map((item, index) => {
+            const x = data.length === 1 ? width / 2 : (index / (data.length - 1)) * width;
+            const y = height - (item.value / maxValue) * height;
+
+            return (
+              <circle
+                key={`${item.label}-${index}`}
+                cx={x}
+                cy={y}
+                r="1.8"
+                fill="rgba(34,197,94,1)"
+              />
+            );
+          })}
+        </svg>
+      </div>
+
+      <div style={chartXAxisStyle}>
+        {data.map((item) => (
+          <div key={item.label} style={chartXAxisLabelStyle}>
+            {item.label}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BodyPartVolumeChart({
+  data,
+}: {
+  data: { label: string; value: number; sets: number }[];
+}) {
+  if (!data.length) {
+    return <p style={mutedStyle}>No body-part data yet.</p>;
+  }
+
+  const maxValue = Math.max(...data.map((item) => item.value), 1);
+
+  return (
+    <div style={chartWrapStyle}>
+      <div style={chartHeaderMiniStyle}>
+        <div>
+          <div style={chartTitleStyle}>Body Part Volume Split</div>
+          <div style={chartSubtitleStyle}>Recent workload distribution</div>
+        </div>
+        <div style={chartBadgeGreenStyle}>Balanced</div>
+      </div>
+
+      <div style={barChartListStyle}>
+        {data.map((item) => {
+          const widthPercent = `${Math.max((item.value / maxValue) * 100, 8)}%`;
+
+          return (
+            <div key={item.label} style={barRowStyle}>
+              <div style={barRowTopStyle}>
+                <span style={barLabelStyle}>{item.label}</span>
+                <span style={barValueStyle}>
+                  {item.value.toLocaleString()} • {item.sets} sets
+                </span>
+              </div>
+
+              <div style={barTrackStyle}>
+                <div
+                  style={{
+                    ...barFillStyle,
+                    width: widthPercent,
+                  }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 export default function ProgressPage() {
@@ -748,6 +873,28 @@ export default function ProgressPage() {
     };
   }, [profile, workouts, sets, cardio]);
 
+  const chartData = useMemo(() => {
+    const recentVolumeTrend = [...computed.recentWorkouts]
+      .slice()
+      .reverse()
+      .map((workout) => ({
+        label: formatDateShort(workout.created_at),
+        value: Math.round(workout.totalVolume),
+        sets: workout.totalSets,
+      }));
+
+    const bodyPartVolumeBars = computed.bodyPartSummary.slice(0, 6).map((item) => ({
+      label: item.bodyPart,
+      value: Math.round(item.volume),
+      sets: item.sets,
+    }));
+
+    return {
+      recentVolumeTrend,
+      bodyPartVolumeBars,
+    };
+  }, [computed]);
+
   const selectedWorkoutReport = useMemo(() => {
     if (!selectedWorkoutId) return null;
 
@@ -956,6 +1103,16 @@ export default function ProgressPage() {
             </span>
           </div>
         </div>
+      </section>
+
+      <section style={twoColGridStyle}>
+        <section style={cardStyle}>
+          <VolumeTrendChart data={chartData.recentVolumeTrend} />
+        </section>
+
+        <section style={cardStyle}>
+          <BodyPartVolumeChart data={chartData.bodyPartVolumeBars} />
+        </section>
       </section>
 
       <section style={twoColGridStyle}>
@@ -1419,7 +1576,7 @@ const heroReviewCardStyle: CSSProperties = {
 };
 
 const heroReviewLabelStyle: CSSProperties = {
-  color: "#ff9b9b",
+  color: "#86efac",
   fontSize: "12px",
   fontWeight: 800,
   letterSpacing: "0.08em",
@@ -1654,7 +1811,7 @@ const exerciseBestStyle: CSSProperties = {
 };
 
 const exerciseBestSubStyle: CSSProperties = {
-  color: "#ff8c8c",
+  color: "#86efac",
   fontSize: "12px",
   marginTop: "4px",
 };
@@ -1692,14 +1849,14 @@ const reportWorkoutMetaStyle: CSSProperties = {
 const reportHighlightCardStyle: CSSProperties = {
   marginTop: "16px",
   marginBottom: "16px",
-  background: "linear-gradient(135deg, rgba(255,26,26,0.08), rgba(255,255,255,0.02))",
+  background: "linear-gradient(135deg, rgba(34,197,94,0.12), rgba(255,255,255,0.02))",
   border: "1px solid rgba(255,255,255,0.06)",
   borderRadius: "16px",
   padding: "14px",
 };
 
 const reportHighlightLabelStyle: CSSProperties = {
-  color: "#ff9b9b",
+  color: "#86efac",
   fontSize: "11px",
   fontWeight: 800,
   letterSpacing: "0.06em",
@@ -1927,6 +2084,115 @@ const highlightSubStyle: CSSProperties = {
   fontSize: "13px",
   marginTop: "8px",
   lineHeight: 1.4,
+};
+
+const chartWrapStyle: CSSProperties = {
+  display: "grid",
+  gap: "12px",
+};
+
+const chartHeaderMiniStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
+  gap: "12px",
+  flexWrap: "wrap",
+};
+
+const chartTitleStyle: CSSProperties = {
+  color: "#ffffff",
+  fontSize: "16px",
+  fontWeight: 800,
+};
+
+const chartSubtitleStyle: CSSProperties = {
+  color: "#9f9f9f",
+  fontSize: "13px",
+  marginTop: "4px",
+};
+
+const chartBadgeGreenStyle: CSSProperties = {
+  background: "rgba(34,197,94,0.14)",
+  border: "1px solid rgba(34,197,94,0.35)",
+  color: "#86efac",
+  borderRadius: "999px",
+  padding: "6px 10px",
+  fontSize: "11px",
+  fontWeight: 800,
+  letterSpacing: "0.04em",
+  textTransform: "uppercase",
+};
+
+const lineChartShellStyle: CSSProperties = {
+  height: "180px",
+  borderRadius: "16px",
+  background: "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))",
+  border: "1px solid rgba(255,255,255,0.05)",
+  padding: "12px",
+};
+
+const svgChartStyle: CSSProperties = {
+  width: "100%",
+  height: "100%",
+  display: "block",
+};
+
+const chartXAxisStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(40px, 1fr))",
+  gap: "6px",
+};
+
+const chartXAxisLabelStyle: CSSProperties = {
+  color: "#8f8f8f",
+  fontSize: "11px",
+  textAlign: "center",
+};
+
+const barChartListStyle: CSSProperties = {
+  display: "grid",
+  gap: "12px",
+};
+
+const barRowStyle: CSSProperties = {
+  display: "grid",
+  gap: "8px",
+};
+
+const barRowTopStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "10px",
+  flexWrap: "wrap",
+};
+
+const barLabelStyle: CSSProperties = {
+  color: "#ffffff",
+  fontSize: "14px",
+  fontWeight: 700,
+};
+
+const barValueStyle: CSSProperties = {
+  color: "#9f9f9f",
+  fontSize: "12px",
+  fontWeight: 700,
+};
+
+const barTrackStyle: CSSProperties = {
+  width: "100%",
+  height: "12px",
+  borderRadius: "999px",
+  background: "rgba(255,255,255,0.06)",
+  overflow: "hidden",
+  border: "1px solid rgba(255,255,255,0.04)",
+};
+
+const barFillStyle: CSSProperties = {
+  height: "100%",
+  borderRadius: "999px",
+  background: "linear-gradient(90deg, rgba(34,197,94,0.70), rgba(74,222,128,1))",
+  boxShadow: "0 0 14px rgba(34,197,94,0.25)",
 };
 
 const mutedStyle: CSSProperties = {
