@@ -53,7 +53,8 @@ export type Muscle =
   | "glutes"
   | "hamstrings"
   | "calves"
-  | "core";
+  | "core"
+  | "hip_flexors";
 
 export type MovementPattern =
   | "horizontal_press"
@@ -117,7 +118,14 @@ export type Laterality = "bilateral" | "unilateral";
 export type FatigueCost = 1 | 2 | 3 | 4 | 5;
 export type Complexity = 1 | 2 | 3 | 4 | 5;
 
-export type JointArea = "shoulders" | "elbows" | "knees" | "lower_back" | "hips";
+export type JointArea =
+  | "shoulders"
+  | "elbows"
+  | "wrists"
+  | "knees"
+  | "lower_back"
+  | "upper_back"
+  | "hips";
 export type JointStress = "low" | "moderate" | "high";
 
 export type ProgressionType =
