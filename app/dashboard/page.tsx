@@ -3,8 +3,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { buildDashboardCoachData } from "@/lib/coach/dashboard";
-import type { UserFacingCoachSummary } from "@/lib/coach/types";
 
 type Profile = {
   id?: number;
@@ -73,7 +71,6 @@ export default function DashboardPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [sets, setSets] = useState<WorkoutSet[]>([]);
-  const [coachData, setCoachData] = useState<UserFacingCoachSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("");
 
@@ -130,23 +127,9 @@ export default function DashboardPage() {
     if (workoutsError) console.error("Workouts load error:", workoutsError);
     if (setsError) console.error("Sets load error:", setsError);
 
-    const nextProfile = (profileData as Profile) ?? null;
-    const nextWorkouts = (workoutsData as Workout[]) ?? [];
-    const nextSets = (setsData as WorkoutSet[]) ?? [];
-
-    setProfile(nextProfile);
-    setWorkouts(nextWorkouts);
-    setSets(nextSets);
-
-    const dashboardCoachData = buildDashboardCoachData({
-      userId: user.id,
-      profile: nextProfile,
-      workouts: nextWorkouts,
-      workoutSets: nextSets,
-    });
-
-    setCoachData(dashboardCoachData.coach);
-
+    setProfile((profileData as Profile) ?? null);
+    setWorkouts((workoutsData as Workout[]) ?? []);
+    setSets((setsData as WorkoutSet[]) ?? []);
     setStatus("");
     setLoading(false);
   }
@@ -183,48 +166,6 @@ export default function DashboardPage() {
     return value
       .replaceAll("_", " ")
       .replace(/\b\w/g, (char) => char.toUpperCase());
-  }
-
-  function formatBodyPartLabel(value: string) {
-    switch (value) {
-      case "full_body":
-        return "Full Body";
-      case "upper":
-        return "Upper Body";
-      case "lower":
-        return "Lower Body";
-      case "push":
-        return "Push";
-      case "pull":
-        return "Pull";
-      case "legs":
-        return "Legs";
-      case "back":
-        return "Back";
-      case "chest":
-        return "Chest";
-      case "shoulders":
-        return "Shoulders";
-      case "arms":
-        return "Arms";
-      default:
-        return "Training";
-    }
-  }
-
-  function formatStyleLabel(value: string) {
-    switch (value) {
-      case "hypertrophy":
-        return "Hypertrophy";
-      case "strength":
-        return "Strength";
-      case "recovery":
-        return "Recovery";
-      case "reentry":
-        return "Re-entry";
-      default:
-        return "Workout";
-    }
   }
 
   const today = startOfDay(new Date());
@@ -645,9 +586,63 @@ export default function DashboardPage() {
       .slice(0, 4);
   }, [completedSets]);
 
+  const overviewText = useMemo(() => {
+    if (completedSets.length === 0) {
+      return "This page turns your logged workouts into simple training signals so you can see strength, consistency, and momentum at a glance.";
+    }
+
+    if (currentStreak >= 3 && volumeMomentum.deltaPct >= 0) {
+      return "You’re building momentum. This dashboard highlights how consistently you are training, where your strength is showing up, and what to focus on next.";
+    }
+
+    if (daysSinceLastWorkout !== null && daysSinceLastWorkout >= 3) {
+      return "This dashboard shows where your training currently stands and makes it easy to see when it is time to get back in rhythm.";
+    }
+
+    return "This page gives you a quick read on your recent training, strongest lifts, and where your volume is leaning right now.";
+  }, [completedSets.length, currentStreak, volumeMomentum.deltaPct, daysSinceLastWorkout]);
+
+  const coachRecommendationText = useMemo(() => {
+    if (completedSets.length === 0) return "Start Logging Workouts";
+
+    if (daysSinceLastWorkout === null || daysSinceLastWorkout >= 3) {
+      return "Train Today";
+    }
+
+    if (volumeMomentum.deltaPct <= -15) {
+      return "Rebuild Momentum";
+    }
+
+    if (currentStreak >= 3 && volumeMomentum.deltaPct >= 0) {
+      return "Keep Pushing";
+    }
+
+    return "Stay Consistent";
+  }, [completedSets.length, daysSinceLastWorkout, currentStreak, volumeMomentum.deltaPct]);
+
+  const coachReasonText = useMemo(() => {
+    if (completedSets.length === 0) {
+      return "Once you log full workouts, this dashboard starts showing real patterns in your training.";
+    }
+
+    if (daysSinceLastWorkout === null || daysSinceLastWorkout >= 3) {
+      return "You have had a little space since your last session, so today is a good chance to get moving again.";
+    }
+
+    if (currentStreak >= 3 && volumeMomentum.deltaPct >= 0) {
+      return "Your recent training has been steady, so the goal now is to keep stacking quality sessions.";
+    }
+
+    if (volumeMomentum.deltaPct <= -15) {
+      return "Your recent output dipped a bit, so a solid session now helps restore rhythm fast.";
+    }
+
+    return "Your training looks fairly stable right now. Keep the next session simple and productive.";
+  }, [completedSets.length, daysSinceLastWorkout, currentStreak, volumeMomentum.deltaPct]);
+
   const nextFocus = useMemo(() => {
     if (bodyPartSummary.length === 0) {
-      return "Log a few more real sessions so your coach can spot where to push next.";
+      return "Log a few more real sessions so your dashboard can start spotting patterns.";
     }
 
     const sorted = [...bodyPartSummary].sort((a, b) => a.sets - b.sets);
@@ -665,32 +660,15 @@ export default function DashboardPage() {
     return "Your body-part distribution looks pretty balanced right now. Keep stacking quality sessions.";
   }, [bodyPartSummary]);
 
-  const coachSummaryText =
-    coachData?.recovery.message ??
-    "Log a few workouts and ReSpawn will start generating smarter coaching.";
-
-  const coachRecommendationText = coachData
-    ? `${formatBodyPartLabel(coachData.recommendation.recommendedBodyPart)} · ${formatStyleLabel(
-        coachData.recommendation.recommendedStyle
-      )}`
-    : "Full Body · Re-entry";
-
-  const coachReasonText =
-    coachData?.recommendation.reason ??
-    "Start logging complete workouts so your coach can learn your training patterns.";
-
   const coachFeed = useMemo<CoachFeedItem[]>(() => {
     const items: CoachFeedItem[] = [];
 
-    if (coachData?.highlights?.length) {
-      for (const highlight of coachData.highlights.slice(0, 2)) {
-        items.push({
-          title: "AI Coach",
-          detail: highlight,
-          tone: "good",
-        });
-      }
-    }
+    items.push({
+      title: "What you are looking at",
+      detail:
+        "This dashboard summarizes your recent training, strongest lifts, volume trends, and body-part emphasis.",
+      tone: "neutral",
+    });
 
     if (currentStreak >= 3) {
       items.push({
@@ -731,7 +709,7 @@ export default function DashboardPage() {
     }
 
     return items.slice(0, 4);
-  }, [coachData, currentStreak, volumeMomentum.deltaPct, repBias, bodyPartSummary]);
+  }, [currentStreak, volumeMomentum.deltaPct, repBias, bodyPartSummary]);
 
   const heatmapDays = useMemo(() => {
     const arr: { label: string; active: boolean; intense: boolean }[] = [];
@@ -759,7 +737,7 @@ export default function DashboardPage() {
     return (
       <main style={pageStyle}>
         <section style={heroCardStyle}>
-          <p style={eyebrowStyle}>RESPAWN AI COACH</p>
+          <p style={eyebrowStyle}>RESPAWN DASHBOARD</p>
           <h1 style={heroTitleStyle}>Loading your dashboard...</h1>
           <p style={heroSubStyle}>Pulling your workouts, sets, and progress data.</p>
         </section>
@@ -772,9 +750,9 @@ export default function DashboardPage() {
       <section style={heroCardStyle}>
         <div style={heroHeaderRowStyle}>
           <div>
-            <p style={eyebrowStyle}>RESPAWN AI COACH</p>
-            <h1 style={heroTitleStyle}>{displayName}&apos;s AI Coach</h1>
-            <p style={heroSubStyle}>{coachSummaryText}</p>
+            <p style={eyebrowStyle}>RESPAWN DASHBOARD</p>
+            <h1 style={heroTitleStyle}>{displayName}&apos;s Training Dashboard</h1>
+            <p style={heroSubStyle}>{overviewText}</p>
           </div>
 
           <button onClick={handleSignOut} style={ghostButtonStyle}>
@@ -783,7 +761,7 @@ export default function DashboardPage() {
         </div>
 
         <div style={coachCalloutStyle}>
-          <div style={coachCalloutLabelStyle}>Coach recommendation</div>
+          <div style={coachCalloutLabelStyle}>Today&apos;s focus</div>
           <div style={coachCalloutTextStyle}>{coachRecommendationText}</div>
           <div style={coachCalloutReasonStyle}>{coachReasonText}</div>
         </div>
@@ -821,7 +799,7 @@ export default function DashboardPage() {
       <section style={mainGridStyle}>
         <section style={{ ...cardStyle, ...featureCardStyle }}>
           <div style={sectionHeaderStyle}>
-            <h2 style={sectionTitle}>AI Coach Insight</h2>
+            <h2 style={sectionTitle}>Quick Read</h2>
           </div>
 
           <div style={featureTextStyle}>{coachRecommendationText}</div>
@@ -838,25 +816,11 @@ export default function DashboardPage() {
             <span style={metricChipStyle}>
               Style: {repBias === "Not enough data" ? "Learning" : repBias}
             </span>
-
-            {coachData ? (
-              <span style={metricChipStyle}>
-                Momentum: {titleCase(coachData.momentumLabel)}
-              </span>
-            ) : null}
-
-            {coachData ? (
-              <span style={metricChipStyle}>
-                Consistency: {titleCase(coachData.consistencyLabel)}
-              </span>
-            ) : null}
           </div>
 
           <div style={subFeatureBoxStyle}>
             <div style={subFeatureLabelStyle}>Next focus</div>
-            <div style={subFeatureTextStyle}>
-              {coachData?.highlights?.[0] ?? nextFocus}
-            </div>
+            <div style={subFeatureTextStyle}>{nextFocus}</div>
           </div>
         </section>
 
