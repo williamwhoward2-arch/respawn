@@ -682,28 +682,6 @@ export default function WorkoutPage() {
     const loadedHistoryMap = await loadExerciseHistory(user.id);
     setHistoryMap(loadedHistoryMap);
 
-    const savedDraft = localStorage.getItem(WORKOUT_DRAFT_KEY);
-    if (savedDraft) {
-      try {
-        const parsedDraft: SavedWorkoutState = JSON.parse(savedDraft);
-        setWorkoutTitle(parsedDraft.workoutTitle || "Build Your Session");
-        setExercises(Array.isArray(parsedDraft.exercises) ? parsedDraft.exercises : []);
-        setCardioEntries(Array.isArray(parsedDraft.cardioEntries) ? parsedDraft.cardioEntries : []);
-        setSecondsElapsed(parsedDraft.secondsElapsed || 0);
-        setTimerRunning(false);
-        setLibraryChoice(parsedDraft.libraryChoice || "");
-        setNewExerciseName(parsedDraft.newExerciseName || "");
-        setNewBodyPart(parsedDraft.newBodyPart || "");
-        setAddExerciseMode(parsedDraft.addExerciseMode || "library");
-        setBodyPartChoice(parsedDraft.bodyPartChoice || "");
-        setStatus("Recovered your in-progress workout.");
-        setAuthLoading(false);
-        return;
-      } catch (draftError) {
-        console.error("Failed to load workout draft:", draftError);
-      }
-    }
-
     const rawGeneratedWorkout = localStorage.getItem("respawn_generated_workout");
 
     if (rawGeneratedWorkout) {
@@ -753,13 +731,49 @@ export default function WorkoutPage() {
         if (mappedExercises.length > 0) {
           setExercises(mappedExercises);
           setWorkoutTitle(parsed.workout_name || "Generated Workout");
+          setCardioEntries([]);
+          setSecondsElapsed(0);
+          setTimerRunning(false);
+          setLibraryChoice("");
+          setLibrarySearch("");
+          setLibraryFilter("All");
+          setNewExerciseName("");
+          setNewBodyPart("");
+          setAddExerciseMode("library");
+          setBodyPartChoice("");
           setStatus(`${parsed.workout_name} loaded.`);
         }
 
         localStorage.removeItem("respawn_generated_workout");
+        localStorage.removeItem(WORKOUT_DRAFT_KEY);
+        setAuthLoading(false);
+        return;
       } catch (loadError) {
         console.error("Failed to load generated workout:", loadError);
         setStatus("Could not load generated workout.");
+      }
+    }
+
+    const savedDraft = localStorage.getItem(WORKOUT_DRAFT_KEY);
+
+    if (savedDraft) {
+      try {
+        const parsedDraft: SavedWorkoutState = JSON.parse(savedDraft);
+        setWorkoutTitle(parsedDraft.workoutTitle || "Build Your Session");
+        setExercises(Array.isArray(parsedDraft.exercises) ? parsedDraft.exercises : []);
+        setCardioEntries(Array.isArray(parsedDraft.cardioEntries) ? parsedDraft.cardioEntries : []);
+        setSecondsElapsed(parsedDraft.secondsElapsed || 0);
+        setTimerRunning(false);
+        setLibraryChoice(parsedDraft.libraryChoice || "");
+        setNewExerciseName(parsedDraft.newExerciseName || "");
+        setNewBodyPart(parsedDraft.newBodyPart || "");
+        setAddExerciseMode(parsedDraft.addExerciseMode || "library");
+        setBodyPartChoice(parsedDraft.bodyPartChoice || "");
+        setStatus("Recovered your in-progress workout.");
+        setAuthLoading(false);
+        return;
+      } catch (draftError) {
+        console.error("Failed to load workout draft:", draftError);
       }
     }
 

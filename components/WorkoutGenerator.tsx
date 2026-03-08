@@ -253,6 +253,8 @@ export default function WorkoutGenerator() {
   const [volumeTier, setVolumeTier] = useState<VolumeTier>("high");
   const [emphasis, setEmphasis] = useState<MuscleEmphasis | "">("");
 
+  const [variationIndex, setVariationIndex] = useState(0);
+
   const [generatedWorkout, setGeneratedWorkout] = useState<WorkoutPayload | null>(null);
   const [lastWorkout, setLastWorkout] = useState<LastWorkoutSummary | null>(null);
   const [lastWorkoutLoading, setLastWorkoutLoading] = useState(true);
@@ -265,6 +267,11 @@ export default function WorkoutGenerator() {
   useEffect(() => {
     void loadLastWorkout();
   }, []);
+
+  useEffect(() => {
+    setVariationIndex(0);
+    setGeneratedWorkout(null);
+  }, [bodyPart, goal, duration, experienceLevel, equipmentAccess, style, volumeTier, emphasis]);
 
   async function loadLastWorkout() {
     setLastWorkoutLoading(true);
@@ -328,6 +335,9 @@ export default function WorkoutGenerator() {
       setError("");
       setGeneratedWorkout(null);
 
+      const nextVariation = variationIndex + 1;
+      setVariationIndex(nextVariation);
+
       const workout = generateWorkout({
         bodyPart,
         goal,
@@ -337,6 +347,7 @@ export default function WorkoutGenerator() {
         style,
         volumeTier,
         emphasis,
+        variationIndex: nextVariation,
       });
 
       setGeneratedWorkout(normalizeLocalWorkout(workout));
@@ -352,6 +363,7 @@ export default function WorkoutGenerator() {
   function handleStartWorkout() {
     if (!generatedWorkout) return;
 
+    localStorage.removeItem("respawn_active_workout_draft");
     localStorage.setItem("respawn_generated_workout", JSON.stringify(generatedWorkout));
     router.push("/Workout");
   }
@@ -559,7 +571,11 @@ export default function WorkoutGenerator() {
             style={isGenerating ? disabledButtonStyle : primaryButtonStyle}
             disabled={isGenerating}
           >
-            {isGenerating ? "Generating..." : "Generate Workout"}
+            {isGenerating
+              ? "Generating..."
+              : generatedWorkout
+              ? "Generate Another Variation"
+              : "Generate Workout"}
           </button>
 
           {generatedWorkout && (
@@ -568,6 +584,12 @@ export default function WorkoutGenerator() {
             </button>
           )}
         </div>
+
+        {generatedWorkout && (
+          <p style={variationHintStyle}>
+            Variation {variationIndex}. Same inputs, different valid exercise mix.
+          </p>
+        )}
 
         {error && <p style={errorStyle}>{error}</p>}
 
@@ -889,6 +911,12 @@ const secondaryButtonStyle: CSSProperties = {
   fontWeight: 700,
   fontSize: "16px",
   cursor: "pointer",
+};
+
+const variationHintStyle: CSSProperties = {
+  marginTop: "12px",
+  color: "#bdbdbd",
+  fontSize: "13px",
 };
 
 const previewCardStyle: CSSProperties = {

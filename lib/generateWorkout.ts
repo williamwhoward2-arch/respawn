@@ -10,6 +10,7 @@ import {
   type WorkoutStyle,
   type VolumeTier,
   type GeneratedWorkoutStyle,
+  type EquipmentType,
 } from "./workoutGeneratorData";
 
 export type GeneratedSet = {
@@ -55,6 +56,7 @@ type GenerateWorkoutInput = {
   style?: WorkoutStyle;
   volumeTier?: VolumeTier;
   emphasis?: MuscleEmphasis | "";
+  variationIndex?: number;
 };
 
 type TemplateSlot =
@@ -68,12 +70,13 @@ type TemplateSlot =
   | "back_row_secondary"
   | "back_vertical_pull"
   | "lat_isolation"
-  | "legs_primary_squat"
-  | "legs_primary_hinge"
-  | "legs_secondary_quad"
-  | "legs_secondary_ham"
+  | "legs_main_knee"
+  | "legs_main_hinge"
+  | "legs_secondary_knee"
+  | "legs_unilateral"
   | "legs_quad_iso"
   | "legs_ham_iso"
+  | "legs_glute_iso"
   | "calves"
   | "shoulder_press"
   | "side_delt"
@@ -91,6 +94,8 @@ type SlotDefinition = {
   optional?: boolean;
 };
 
+type LegFocus = "balanced" | "quad_bias" | "glute_ham_bias";
+
 const STYLE_LABELS: Record<WorkoutStyle, GeneratedWorkoutStyle> = {
   balanced: "Balanced Hypertrophy",
   bodybuilding: "Bodybuilding Builder",
@@ -105,6 +110,24 @@ const EXPERIENCE_RANK: Record<ExperienceLevel, number> = {
   beginner: 1,
   intermediate: 2,
   advanced: 3,
+};
+
+const EQUIPMENT_COMPATIBILITY: Record<EquipmentAccess, EquipmentType[]> = {
+  full_gym: [
+    "barbell",
+    "dumbbell",
+    "kettlebell",
+    "cable",
+    "machine",
+    "bodyweight",
+    "smith",
+    "plate_loaded",
+  ],
+  dumbbells_only: ["dumbbell", "kettlebell", "bodyweight"],
+  barbell_rack: ["barbell", "dumbbell", "bodyweight"],
+  machines_only: ["machine", "cable", "plate_loaded", "smith", "bodyweight"],
+  bodyweight_only: ["bodyweight"],
+  minimal_home_gym: ["dumbbell", "barbell", "kettlebell", "bodyweight"],
 };
 
 function toTitleCase(value: string) {
@@ -123,6 +146,12 @@ function shuffleArray<T>(array: T[]): T[] {
 function sampleOne<T>(items: T[]): T | null {
   if (!items.length) return null;
   return items[Math.floor(Math.random() * items.length)];
+}
+
+function rotateArray<T>(items: T[], offset: number): T[] {
+  if (!items.length) return items;
+  const normalizedOffset = ((offset % items.length) + items.length) % items.length;
+  return [...items.slice(normalizedOffset), ...items.slice(0, normalizedOffset)];
 }
 
 function buildSets(setCount: number, reps: string): GeneratedSet[] {
@@ -207,7 +236,11 @@ function isExerciseValidForUser(
   equipmentAccess: EquipmentAccess,
   experienceLevel: ExperienceLevel
 ) {
-  const equipmentOk = exercise.equipmentAccess.includes(equipmentAccess);
+  const allowedEquipment = EQUIPMENT_COMPATIBILITY[equipmentAccess];
+  const equipmentOk = exercise.equipmentTypes.some((type) =>
+    allowedEquipment.includes(type)
+  );
+
   const levelOk = exercise.levels.some(
     (level) => EXPERIENCE_RANK[level] <= EXPERIENCE_RANK[experienceLevel]
   );
@@ -263,6 +296,12 @@ function getPoolForBodyPart(bodyPart: BodyPart) {
 
     return false;
   });
+}
+
+function getLegFocus(emphasis?: MuscleEmphasis | ""): LegFocus {
+  if (emphasis === "quad_bias") return "quad_bias";
+  if (emphasis === "glute_bias" || emphasis === "hamstring_bias") return "glute_ham_bias";
+  return "balanced";
 }
 
 function buildSlotSelector(slot: TemplateSlot, bodyPart: BodyPart) {
@@ -334,30 +373,50 @@ function buildSlotSelector(slot: TemplateSlot, bodyPart: BodyPart) {
             exercise.movementPattern === "vertical_pull")
         );
 
-      case "legs_primary_squat":
-        return exercise.category === "main" && exercise.movementPattern === "squat";
-
-      case "legs_primary_hinge":
-        return exercise.category === "main" && exercise.movementPattern === "hinge";
-
-      case "legs_secondary_quad":
+      case "legs_main_knee":
         return (
           ["main", "accessory"].includes(exercise.category) &&
-          (exercise.movementPattern === "squat" || exercise.movementPattern === "lunge") &&
+          ["squat", "lunge"].includes(exercise.movementPattern) &&
           ["quads", "glutes"].includes(exercise.primaryMuscle)
         );
 
-      case "legs_secondary_ham":
+      case "legs_main_hinge":
         return (
-          ["main", "accessory", "isolation"].includes(exercise.category) &&
-          exercise.primaryMuscle === "hamstrings"
+          ["main", "accessory"].includes(exercise.category) &&
+          exercise.movementPattern === "hinge" &&
+          ["hamstrings", "glutes"].includes(exercise.primaryMuscle)
+        );
+
+      case "legs_secondary_knee":
+        return (
+          ["main", "accessory"].includes(exercise.category) &&
+          ["squat", "lunge"].includes(exercise.movementPattern)
+        );
+
+      case "legs_unilateral":
+        return (
+          exercise.laterality === "unilateral" &&
+          ["quads", "glutes", "hamstrings"].includes(exercise.primaryMuscle)
         );
 
       case "legs_quad_iso":
-        return exercise.category === "isolation" && exercise.primaryMuscle === "quads";
+        return (
+          exercise.category === "isolation" &&
+          exercise.primaryMuscle === "quads"
+        );
 
       case "legs_ham_iso":
-        return exercise.category === "isolation" && exercise.primaryMuscle === "hamstrings";
+        return (
+          exercise.category === "isolation" &&
+          exercise.primaryMuscle === "hamstrings"
+        );
+
+      case "legs_glute_iso":
+        return (
+          (exercise.primaryMuscle === "glutes" &&
+            ["accessory", "isolation"].includes(exercise.category)) ||
+          exercise.emphasis?.includes("glute_bias")
+        );
 
       case "calves":
         return exercise.primaryMuscle === "calves";
@@ -431,6 +490,108 @@ function buildSlotSelector(slot: TemplateSlot, bodyPart: BodyPart) {
   };
 }
 
+function getLegTemplate(
+  volumeTier: VolumeTier,
+  emphasis?: MuscleEmphasis | ""
+): SlotDefinition[] {
+  const focus = getLegFocus(emphasis);
+
+  if (focus === "quad_bias") {
+    if (volumeTier === "brutal") {
+      return [
+        { slot: "legs_main_knee", sets: 4 },
+        { slot: "legs_secondary_knee", sets: 4 },
+        { slot: "legs_unilateral", sets: 3 },
+        { slot: "legs_quad_iso", sets: 3 },
+        { slot: "legs_ham_iso", sets: 3 },
+        { slot: "calves", sets: 4 },
+      ];
+    }
+
+    if (volumeTier === "high") {
+      return [
+        { slot: "legs_main_knee", sets: 4 },
+        { slot: "legs_secondary_knee", sets: 3 },
+        { slot: "legs_unilateral", sets: 3 },
+        { slot: "legs_quad_iso", sets: 3 },
+        { slot: "legs_ham_iso", sets: 2 },
+        { slot: "calves", sets: 3 },
+      ];
+    }
+
+    return [
+      { slot: "legs_main_knee", sets: 4 },
+      { slot: "legs_unilateral", sets: 3 },
+      { slot: "legs_quad_iso", sets: 3 },
+      { slot: "legs_ham_iso", sets: 2 },
+      { slot: "calves", sets: 3 },
+    ];
+  }
+
+  if (focus === "glute_ham_bias") {
+    if (volumeTier === "brutal") {
+      return [
+        { slot: "legs_main_hinge", sets: 4 },
+        { slot: "legs_unilateral", sets: 4 },
+        { slot: "legs_secondary_knee", sets: 3 },
+        { slot: "legs_ham_iso", sets: 3 },
+        { slot: "legs_glute_iso", sets: 3 },
+        { slot: "calves", sets: 4 },
+      ];
+    }
+
+    if (volumeTier === "high") {
+      return [
+        { slot: "legs_main_hinge", sets: 4 },
+        { slot: "legs_unilateral", sets: 3 },
+        { slot: "legs_secondary_knee", sets: 3 },
+        { slot: "legs_ham_iso", sets: 3 },
+        { slot: "legs_glute_iso", sets: 2 },
+        { slot: "calves", sets: 3 },
+      ];
+    }
+
+    return [
+      { slot: "legs_main_hinge", sets: 4 },
+      { slot: "legs_unilateral", sets: 3 },
+      { slot: "legs_ham_iso", sets: 3 },
+      { slot: "legs_glute_iso", sets: 2 },
+      { slot: "calves", sets: 3 },
+    ];
+  }
+
+  if (volumeTier === "brutal") {
+    return [
+      { slot: "legs_main_knee", sets: 4 },
+      { slot: "legs_main_hinge", sets: 4 },
+      { slot: "legs_unilateral", sets: 3 },
+      { slot: "legs_quad_iso", sets: 3 },
+      { slot: "legs_ham_iso", sets: 3 },
+      { slot: "calves", sets: 4 },
+    ];
+  }
+
+  if (volumeTier === "high") {
+    return [
+      { slot: "legs_main_knee", sets: 4 },
+      { slot: "legs_main_hinge", sets: 4 },
+      { slot: "legs_unilateral", sets: 3 },
+      { slot: "legs_quad_iso", sets: 3 },
+      { slot: "legs_ham_iso", sets: 2 },
+      { slot: "calves", sets: 3 },
+    ];
+  }
+
+  return [
+    { slot: "legs_main_knee", sets: 4 },
+    { slot: "legs_main_hinge", sets: 3 },
+    { slot: "legs_unilateral", sets: 3 },
+    { slot: "legs_quad_iso", sets: 2 },
+    { slot: "legs_ham_iso", sets: 2 },
+    { slot: "calves", sets: 3 },
+  ];
+}
+
 function getTemplate(
   bodyPart: BodyPart,
   volumeTier: VolumeTier,
@@ -438,8 +599,6 @@ function getTemplate(
 ): SlotDefinition[] {
   const upperChestBias = emphasis === "upper_chest";
   const latBias = emphasis === "lat_width";
-  const quadBias = emphasis === "quad_bias";
-  const hamBias = emphasis === "hamstring_bias";
   const sideDeltBias = emphasis === "side_delt_bias";
 
   if (bodyPart === "chest") {
@@ -509,50 +668,7 @@ function getTemplate(
   }
 
   if (bodyPart === "legs") {
-    if (volumeTier === "brutal") {
-      return [
-        {
-          slot: quadBias
-            ? "legs_primary_squat"
-            : hamBias
-            ? "legs_primary_hinge"
-            : "legs_primary_squat",
-          sets: 4,
-        },
-        { slot: "legs_primary_hinge", sets: 4 },
-        { slot: "legs_secondary_quad", sets: 4 },
-        { slot: "legs_secondary_ham", sets: 3 },
-        { slot: "legs_quad_iso", sets: 3 },
-        { slot: "legs_ham_iso", sets: 3 },
-        { slot: "calves", sets: 4 },
-      ];
-    }
-
-    if (volumeTier === "high") {
-      return [
-        {
-          slot: quadBias
-            ? "legs_primary_squat"
-            : hamBias
-            ? "legs_primary_hinge"
-            : "legs_primary_squat",
-          sets: 4,
-        },
-        { slot: "legs_primary_hinge", sets: 4 },
-        { slot: "legs_secondary_quad", sets: 3 },
-        { slot: "legs_ham_iso", sets: 3 },
-        { slot: "legs_quad_iso", sets: 3 },
-        { slot: "calves", sets: 4 },
-      ];
-    }
-
-    return [
-      { slot: quadBias ? "legs_primary_squat" : "legs_primary_hinge", sets: 4 },
-      { slot: "legs_secondary_quad", sets: 3 },
-      { slot: "legs_ham_iso", sets: 3 },
-      { slot: "legs_quad_iso", sets: 2 },
-      { slot: "calves", sets: 3 },
-    ];
+    return getLegTemplate(volumeTier, emphasis);
   }
 
   if (bodyPart === "shoulders") {
@@ -640,7 +756,7 @@ function getTemplate(
 
   if (bodyPart === "full_body") {
     return [
-      { slot: "legs_primary_squat", sets: 3 },
+      { slot: "legs_main_knee", sets: 3 },
       { slot: "back_row_primary", sets: 3 },
       { slot: "primary_press", sets: 3 },
       { slot: "back_vertical_pull", sets: 3 },
@@ -732,12 +848,29 @@ function scoreExerciseForGoal(exercise: Exercise, goal: Goal) {
     if (exercise.category === "accessory") score += 3;
     if (exercise.category === "isolation") score += 4;
     if (exercise.isStable) score += 1;
+
+    if (
+      ["quads", "glutes", "hamstrings"].includes(exercise.primaryMuscle) &&
+      exercise.isStable
+    ) {
+      score += 2;
+    }
   }
 
   if (goal === "fat_loss") {
     if (exercise.category === "accessory") score += 2;
-    if (["lunge", "core", "bodyweight_push", "bodyweight_pull"].includes(exercise.movementPattern)) {
+    if (
+      ["lunge", "core", "bodyweight_push", "bodyweight_pull"].includes(
+        exercise.movementPattern
+      )
+    ) {
       score += 2;
+    }
+    if (
+      ["quads", "glutes", "hamstrings"].includes(exercise.primaryMuscle) &&
+      exercise.isStable
+    ) {
+      score += 1;
     }
   }
 
@@ -751,10 +884,22 @@ function scoreExerciseForGoal(exercise: Exercise, goal: Goal) {
 function scoreExerciseForEmphasis(exercise: Exercise, emphasis?: MuscleEmphasis | "") {
   if (!emphasis) return 0;
   if (exercise.emphasis?.includes(emphasis)) return 6;
+
+  if (
+    emphasis === "glute_bias" &&
+    ["glutes", "hamstrings"].includes(exercise.primaryMuscle)
+  ) {
+    return 3;
+  }
+
   return 0;
 }
 
-function scoreExerciseForStructure(exercise: Exercise, selected: Exercise[]) {
+function scoreExerciseForStructure(
+  exercise: Exercise,
+  selected: Exercise[],
+  bodyPart: BodyPart
+) {
   let score = 0;
 
   const samePrimaryCount = selected.filter(
@@ -765,9 +910,18 @@ function scoreExerciseForStructure(exercise: Exercise, selected: Exercise[]) {
   ).length;
 
   score -= samePrimaryCount * 2;
-  score -= samePatternCount * 3;
 
-  if (exercise.category === "main" && selected.filter((item) => item.category === "main").length >= 2) {
+  if (bodyPart === "legs") {
+    score -= samePatternCount * 1;
+  } else {
+    score -= samePatternCount * 3;
+  }
+
+  if (
+    exercise.category === "main" &&
+    selected.filter((item) => item.category === "main").length >= 2 &&
+    bodyPart !== "legs"
+  ) {
     score -= 3;
   }
 
@@ -825,7 +979,11 @@ function pickRepRange(goal: Goal, style: WorkoutStyle, exercise: Exercise) {
 function getRestSeconds(goal: Goal, style: WorkoutStyle, exercise: Exercise) {
   if (goal === "strength") {
     if (exercise.category === "main") {
-      if (["squat", "hinge", "horizontal_press", "vertical_press"].includes(exercise.movementPattern)) {
+      if (
+        ["squat", "hinge", "horizontal_press", "vertical_press"].includes(
+          exercise.movementPattern
+        )
+      ) {
         return 240;
       }
       return 180;
@@ -911,8 +1069,8 @@ function buildExerciseReason(
   if (
     slot === "primary_press" ||
     slot === "back_row_primary" ||
-    slot === "legs_primary_squat" ||
-    slot === "legs_primary_hinge" ||
+    slot === "legs_main_knee" ||
+    slot === "legs_main_hinge" ||
     slot === "shoulder_press"
   ) {
     return "Included as a primary anchor movement to drive the session.";
@@ -1062,7 +1220,9 @@ function pickBestExercise(params: {
   goal: Goal;
   emphasis?: MuscleEmphasis | "";
   usedIds: Set<string>;
+  bodyPart: BodyPart;
   allowSameMovement?: boolean;
+  variationIndex?: number;
 }) {
   const {
     candidates,
@@ -1071,14 +1231,18 @@ function pickBestExercise(params: {
     goal,
     emphasis,
     usedIds,
+    bodyPart,
     allowSameMovement = false,
+    variationIndex = 0,
   } = params;
 
   const usedPatterns = selected.map((exercise) => exercise.movementPattern);
 
   const available = candidates.filter((exercise) => {
     if (usedIds.has(exercise.id)) return false;
-    if (!allowSameMovement && usedPatterns.includes(exercise.movementPattern)) return false;
+    if (!allowSameMovement && usedPatterns.includes(exercise.movementPattern) && bodyPart !== "legs") {
+      return false;
+    }
     return true;
   });
 
@@ -1088,12 +1252,17 @@ function pickBestExercise(params: {
 
   if (!pool.length) return null;
 
-  const scored = pool.map((exercise) => {
+  const rotatedPool = rotateArray(pool, variationIndex);
+
+  const scored = rotatedPool.map((exercise, index) => {
     let score = 0;
     score += scoreExerciseForStyle(exercise, style);
     score += scoreExerciseForGoal(exercise, goal);
     score += scoreExerciseForEmphasis(exercise, emphasis);
-    score += scoreExerciseForStructure(exercise, selected);
+    score += scoreExerciseForStructure(exercise, selected, bodyPart);
+
+    if (index < 3) score += 2;
+    else if (index < 6) score += 1;
 
     return { exercise, score };
   });
@@ -1105,7 +1274,9 @@ function pickBestExercise(params: {
     .filter((item) => item.score >= topScore - 2)
     .map((item) => item.exercise);
 
-  return sampleOne(topPool);
+  const rotatedTopPool = rotateArray(topPool, variationIndex);
+
+  return rotatedTopPool[0] ?? sampleOne(topPool);
 }
 
 function attachFinisherNotes(style: WorkoutStyle) {
@@ -1117,6 +1288,23 @@ function attachFinisherNotes(style: WorkoutStyle) {
   return null;
 }
 
+function mergeDuplicateSelections(
+  selected: Array<{ exercise: Exercise; slot: TemplateSlot; setCount: number }>
+) {
+  const merged: Array<{ exercise: Exercise; slot: TemplateSlot; setCount: number }> = [];
+
+  selected.forEach((item) => {
+    const existing = merged.find((entry) => entry.exercise.id === item.exercise.id);
+    if (existing) {
+      existing.setCount += item.setCount;
+    } else {
+      merged.push({ ...item });
+    }
+  });
+
+  return merged;
+}
+
 export function generateWorkout({
   bodyPart,
   goal,
@@ -1126,6 +1314,7 @@ export function generateWorkout({
   style = "bodybuilding",
   volumeTier = "high",
   emphasis = "",
+  variationIndex = 0,
 }: GenerateWorkoutInput): GeneratedWorkout {
   const pool = getPoolForBodyPart(bodyPart).filter((exercise) =>
     isExerciseValidForUser(exercise, equipmentAccess, experienceLevel)
@@ -1135,7 +1324,7 @@ export function generateWorkout({
   const selected: Array<{ exercise: Exercise; slot: TemplateSlot; setCount: number }> = [];
   const usedIds = new Set<string>();
 
-  template.forEach((slotDef) => {
+  template.forEach((slotDef, slotIndex) => {
     const selector = buildSlotSelector(slotDef.slot, bodyPart);
     const candidates = pool.filter(selector);
 
@@ -1145,6 +1334,8 @@ export function generateWorkout({
       "biceps_secondary",
       "triceps_secondary",
       "finisher",
+      "legs_secondary_knee",
+      "legs_unilateral",
     ].includes(slotDef.slot);
 
     const chosen = pickBestExercise({
@@ -1154,10 +1345,37 @@ export function generateWorkout({
       goal,
       emphasis,
       usedIds,
+      bodyPart,
       allowSameMovement,
+      variationIndex: variationIndex + slotIndex,
     });
 
-    if (!chosen) return;
+    if (!chosen) {
+      if (!slotDef.optional) {
+        const fallbackCandidates = pool.filter((exercise) => !usedIds.has(exercise.id));
+        const fallback = pickBestExercise({
+          candidates: fallbackCandidates,
+          selected: selected.map((item) => item.exercise),
+          style,
+          goal,
+          emphasis,
+          usedIds,
+          bodyPart,
+          allowSameMovement: true,
+          variationIndex: variationIndex + slotIndex,
+        });
+
+        if (fallback) {
+          selected.push({
+            exercise: fallback,
+            slot: slotDef.slot,
+            setCount: slotDef.sets,
+          });
+          usedIds.add(fallback.id);
+        }
+      }
+      return;
+    }
 
     selected.push({
       exercise: chosen,
@@ -1168,9 +1386,10 @@ export function generateWorkout({
   });
 
   if (selected.length < 4) {
-    const fallback = shuffleArray(pool)
-      .filter((exercise) => !usedIds.has(exercise.id))
-      .slice(0, 3);
+    const fallback = rotateArray(
+      shuffleArray(pool).filter((exercise) => !usedIds.has(exercise.id)),
+      variationIndex
+    ).slice(0, 3);
 
     fallback.forEach((exercise) => {
       selected.push({
@@ -1182,10 +1401,12 @@ export function generateWorkout({
     });
   }
 
-  const exercises: GeneratedExercise[] = selected.map((item, index) => {
+  const mergedSelections = mergeDuplicateSelections(selected);
+
+  const exercises: GeneratedExercise[] = mergedSelections.map((item, index) => {
     const repRange = pickRepRange(goal, style, item.exercise);
     const note =
-      item.slot === "finisher" && index === selected.length - 1
+      item.slot === "finisher" && index === mergedSelections.length - 1
         ? attachFinisherNotes(style)
         : null;
 
