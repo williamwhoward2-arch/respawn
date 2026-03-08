@@ -6,8 +6,8 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { supabase } from "@/lib/supabaseClient";
 
 const navItems = [
-  { label: "Dashboard", href: "/dashboard" },
-  { label: "Today", href: "/Today" },
+  { label: "AI Coach", href: "/dashboard" },
+  { label: "Build", href: "/Today" },
   { label: "Workout", href: "/Workout" },
   { label: "Progress", href: "/Progress" },
   { label: "Profile", href: "/Profile" },

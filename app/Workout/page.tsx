@@ -97,6 +97,8 @@ type SavedWorkoutState = {
   libraryChoice: string;
   newExerciseName: string;
   newBodyPart: string;
+  addExerciseMode: "library" | "custom" | "bodypart";
+  bodyPartChoice: string;
 };
 
 const CARDIO_METHODS = [
@@ -355,9 +357,16 @@ function formatRestLabel(restSeconds?: number) {
 function getWorkoutWarmupText(exercises: Exercise[]) {
   const compoundCount = exercises.filter((exercise) => {
     const lowerName = exercise.name.toLowerCase();
-    return ["press", "squat", "row", "deadlift", "pulldown", "lung", "hip thrust", "shoulder press"].some((term) =>
-      lowerName.includes(term)
-    );
+    return [
+      "press",
+      "squat",
+      "row",
+      "deadlift",
+      "pulldown",
+      "lung",
+      "hip thrust",
+      "shoulder press",
+    ].some((term) => lowerName.includes(term));
   }).length;
 
   if (compoundCount >= 2) {
@@ -373,10 +382,14 @@ function getWorkoutFocusLine(title: string, exercises: Exercise[]) {
     return acc;
   }, {});
 
-  const topBodyPart = Object.entries(bodyPartCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "Workout";
+  const topBodyPart =
+    Object.entries(bodyPartCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "Workout";
   const totalSets = exercises.reduce((sum, exercise) => sum + exercise.sets.length, 0);
-  const volumeTag = totalSets >= 18 ? "High Volume" : totalSets >= 10 ? "Moderate Volume" : "Low Volume";
-  const builderTag = title.toLowerCase().includes("strength") ? "Strength Builder" : "Bodybuilding Builder";
+  const volumeTag =
+    totalSets >= 18 ? "High Volume" : totalSets >= 10 ? "Moderate Volume" : "Low Volume";
+  const builderTag = title.toLowerCase().includes("strength")
+    ? "Strength Builder"
+    : "Bodybuilding Builder";
 
   return `${topBodyPart} • ${builderTag} • ${volumeTag}`;
 }
@@ -479,7 +492,10 @@ function buildProgressionSuggestion(
 
   const increment = getWeightIncrement(referenceWeight || 20, exercise.bodyPart);
   let suggestedWeight = referenceWeight;
-  let suggestedReps = Math.max(repRange.min, Math.min(referenceReps || repRange.min, repRange.max));
+  let suggestedReps = Math.max(
+    repRange.min,
+    Math.min(referenceReps || repRange.min, repRange.max)
+  );
   let reason = `Stay in the ${repRange.min}-${repRange.max} rep range and keep form tight.`;
 
   if (referenceReps >= repRange.max + 1) {
@@ -515,6 +531,23 @@ function buildProgressionSuggestion(
   };
 }
 
+function sanitizeIntegerInput(value: string) {
+  return value.replace(/[^\d]/g, "");
+}
+
+function sanitizeDecimalInput(value: string) {
+  const cleaned = value.replace(/[^\d.]/g, "");
+  const firstDot = cleaned.indexOf(".");
+  if (firstDot === -1) return cleaned;
+  return `${cleaned.slice(0, firstDot + 1)}${cleaned
+    .slice(firstDot + 1)
+    .replace(/\./g, "")}`;
+}
+
+function formatMilesValue(value: number) {
+  return value <= 0 ? "" : formatSmartNumber(Math.max(0, value));
+}
+
 export default function WorkoutPage() {
   const router = useRouter();
 
@@ -529,6 +562,10 @@ export default function WorkoutPage() {
   const [libraryFilter, setLibraryFilter] = useState("All");
   const [newExerciseName, setNewExerciseName] = useState("");
   const [newBodyPart, setNewBodyPart] = useState("");
+  const [addExerciseMode, setAddExerciseMode] = useState<
+    "library" | "custom" | "bodypart"
+  >("library");
+  const [bodyPartChoice, setBodyPartChoice] = useState("");
 
   const [secondsElapsed, setSecondsElapsed] = useState(0);
   const [timerRunning, setTimerRunning] = useState(false);
@@ -657,6 +694,8 @@ export default function WorkoutPage() {
         setLibraryChoice(parsedDraft.libraryChoice || "");
         setNewExerciseName(parsedDraft.newExerciseName || "");
         setNewBodyPart(parsedDraft.newBodyPart || "");
+        setAddExerciseMode(parsedDraft.addExerciseMode || "library");
+        setBodyPartChoice(parsedDraft.bodyPartChoice || "");
         setStatus("Recovered your in-progress workout.");
         setAuthLoading(false);
         return;
@@ -761,6 +800,8 @@ export default function WorkoutPage() {
       libraryChoice,
       newExerciseName,
       newBodyPart,
+      addExerciseMode,
+      bodyPartChoice,
     };
 
     localStorage.setItem(WORKOUT_DRAFT_KEY, JSON.stringify(draft));
@@ -774,6 +815,8 @@ export default function WorkoutPage() {
     libraryChoice,
     newExerciseName,
     newBodyPart,
+    addExerciseMode,
+    bodyPartChoice,
   ]);
 
   const allExerciseLibrary = useMemo(() => {
@@ -797,6 +840,16 @@ export default function WorkoutPage() {
       return matchesBodyPart && matchesSearch;
     });
   }, [allExerciseLibrary, libraryFilter, librarySearch]);
+
+  const bodyPartFilteredLibrary = useMemo(() => {
+    return allExerciseLibrary.filter((item) => {
+      const matchesBodyPart = bodyPartChoice ? item.bodyPart === bodyPartChoice : true;
+      const matchesSearch =
+        librarySearch.trim() === "" ||
+        item.name.toLowerCase().includes(librarySearch.trim().toLowerCase());
+      return matchesBodyPart && matchesSearch;
+    });
+  }, [allExerciseLibrary, bodyPartChoice, librarySearch]);
 
   const libraryMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -1151,12 +1204,39 @@ export default function WorkoutPage() {
   }
 
   function addExercise() {
-    if (libraryChoice) {
+    if (addExerciseMode === "library") {
+      if (!libraryChoice) {
+        setStatus("Choose an exercise from the library.");
+        return;
+      }
+
       addExerciseFromInput(libraryChoice, libraryMap.get(libraryChoice) || "Other");
       return;
     }
 
-    addExerciseFromInput(newExerciseName, newBodyPart || "Other");
+    if (addExerciseMode === "custom") {
+      if (!newExerciseName.trim()) {
+        setStatus("Enter a custom exercise name.");
+        return;
+      }
+
+      if (!newBodyPart) {
+        setStatus("Select a body part for your custom exercise.");
+        return;
+      }
+
+      addExerciseFromInput(newExerciseName, newBodyPart || "Other");
+      return;
+    }
+
+    if (addExerciseMode === "bodypart") {
+      if (!libraryChoice) {
+        setStatus("Choose an exercise after selecting a body part.");
+        return;
+      }
+
+      addExerciseFromInput(libraryChoice, libraryMap.get(libraryChoice) || bodyPartChoice || "Other");
+    }
   }
 
   function addRecentExercise(name: string) {
@@ -1220,20 +1300,121 @@ export default function WorkoutPage() {
     value: string
   ) {
     setCardioEntries((prev) =>
-      prev.map((entry) =>
-        entry.id === cardioId
-          ? { ...entry, [field]: value, completed: false }
-          : entry
-      )
+      prev.map((entry) => {
+        if (entry.id !== cardioId) return entry;
+
+        if (field === "minutes" || field === "seconds") {
+          return {
+            ...entry,
+            [field]: sanitizeIntegerInput(value),
+            completed: false,
+          };
+        }
+
+        if (field === "miles") {
+          return {
+            ...entry,
+            miles: sanitizeDecimalInput(value),
+            completed: false,
+          };
+        }
+
+        return { ...entry, [field]: value, completed: false };
+      })
     );
   }
 
-  function toggleCardioCompleted(cardioId: string) {
+  function adjustCardioMinutes(cardioId: string, delta: number) {
     setCardioEntries((prev) =>
-      prev.map((entry) =>
-        entry.id === cardioId ? { ...entry, completed: !entry.completed } : entry
-      )
+      prev.map((entry) => {
+        if (entry.id !== cardioId) return entry;
+
+        const currentTotalSeconds =
+          toNumber(entry.minutes) * 60 + Math.min(59, toNumber(entry.seconds));
+        const nextTotalSeconds = Math.max(0, currentTotalSeconds + delta * 60);
+        const nextMinutes = Math.floor(nextTotalSeconds / 60);
+        const nextSeconds = nextTotalSeconds % 60;
+
+        return {
+          ...entry,
+          minutes: nextMinutes > 0 ? String(nextMinutes) : "",
+          seconds: nextSeconds > 0 ? String(nextSeconds) : "",
+          completed: false,
+        };
+      })
     );
+
+    setStatus("Cardio time adjusted.");
+  }
+
+  function adjustCardioSeconds(cardioId: string, delta: number) {
+    setCardioEntries((prev) =>
+      prev.map((entry) => {
+        if (entry.id !== cardioId) return entry;
+
+        const currentTotalSeconds =
+          toNumber(entry.minutes) * 60 + Math.min(59, toNumber(entry.seconds));
+        const nextTotalSeconds = Math.max(0, currentTotalSeconds + delta);
+        const nextMinutes = Math.floor(nextTotalSeconds / 60);
+        const nextSeconds = nextTotalSeconds % 60;
+
+        return {
+          ...entry,
+          minutes: nextMinutes > 0 ? String(nextMinutes) : "",
+          seconds: nextSeconds > 0 ? String(nextSeconds) : "",
+          completed: false,
+        };
+      })
+    );
+
+    setStatus("Cardio time adjusted.");
+  }
+
+  function adjustCardioMiles(cardioId: string, delta: number) {
+    setCardioEntries((prev) =>
+      prev.map((entry) => {
+        if (entry.id !== cardioId) return entry;
+
+        const currentMiles = toNumber(entry.miles);
+        const nextMiles = Math.max(0, Math.round((currentMiles + delta) * 100) / 100);
+
+        return {
+          ...entry,
+          miles: formatMilesValue(nextMiles),
+          completed: false,
+        };
+      })
+    );
+
+    setStatus("Cardio distance adjusted.");
+  }
+
+  function toggleCardioCompleted(cardioId: string) {
+    let blocked = false;
+
+    setCardioEntries((prev) =>
+      prev.map((entry) => {
+        if (entry.id !== cardioId) return entry;
+
+        const hasData =
+          String(entry.minutes).trim() !== "" ||
+          String(entry.seconds).trim() !== "" ||
+          String(entry.miles).trim() !== "";
+
+        if (!hasData) {
+          blocked = true;
+          return entry;
+        }
+
+        return { ...entry, completed: !entry.completed };
+      })
+    );
+
+    if (blocked) {
+      setStatus("Add time or miles before marking cardio complete.");
+      return;
+    }
+
     setStatus("Cardio updated.");
   }
 
@@ -1369,6 +1550,157 @@ export default function WorkoutPage() {
         : "Workout saved successfully. Cardio summary was preserved in notes."
     );
     setFinished(true);
+  }
+
+  function renderAddExercisePanel() {
+    if (addExerciseMode === "library") {
+      return (
+        <div style={addExercisePanelStyle}>
+          <div style={inputGridStyle}>
+            <input
+              placeholder="Search exercise library"
+              value={librarySearch}
+              onChange={(e) => setLibrarySearch(e.target.value)}
+              style={inputStyle}
+            />
+
+            <select
+              value={libraryFilter}
+              onChange={(e) => {
+                setLibraryFilter(e.target.value);
+                setLibraryChoice("");
+              }}
+              style={selectStyle}
+            >
+              <option value="All">All body parts</option>
+              {BODY_PARTS.filter(
+                (part) => part !== "Push" && part !== "Pull" && part !== "Full Body"
+              ).map((part) => (
+                <option key={part} value={part}>
+                  {part}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={libraryChoice}
+              onChange={(e) => setLibraryChoice(e.target.value)}
+              style={selectStyle}
+            >
+              <option value="">
+                Choose from library ({filteredExerciseLibrary.length})
+              </option>
+              {filteredExerciseLibrary.slice(0, 250).map((exercise) => (
+                <option key={exercise.name} value={exercise.name}>
+                  {exercise.name} • {exercise.bodyPart}
+                  {exercise.custom ? " • Custom" : ""}
+                </option>
+              ))}
+            </select>
+
+            <button onClick={addExercise} style={primaryButtonStyle}>
+              Add Exercise
+            </button>
+          </div>
+
+          <p style={helperTextStyle}>
+            Fastest option. Search, choose, add.
+          </p>
+        </div>
+      );
+    }
+
+    if (addExerciseMode === "custom") {
+      return (
+        <div style={addExercisePanelStyle}>
+          <div style={inputGridStyle}>
+            <input
+              placeholder="Custom exercise name"
+              value={newExerciseName}
+              onChange={(e) => setNewExerciseName(e.target.value)}
+              style={inputStyle}
+            />
+
+            <select
+              value={newBodyPart}
+              onChange={(e) => setNewBodyPart(e.target.value)}
+              style={selectStyle}
+            >
+              <option value="">Select body part</option>
+              {BODY_PARTS.map((part) => (
+                <option key={part} value={part}>
+                  {part}
+                </option>
+              ))}
+            </select>
+
+            <button onClick={addExercise} style={primaryButtonStyle}>
+              Add Custom Exercise
+            </button>
+          </div>
+
+          <p style={helperTextStyle}>
+            Custom exercises are saved locally on this device and will show up in your library.
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <div style={addExercisePanelStyle}>
+        <div style={inputGridStyle}>
+          <select
+            value={bodyPartChoice}
+            onChange={(e) => {
+              setBodyPartChoice(e.target.value);
+              setLibraryChoice("");
+            }}
+            style={selectStyle}
+          >
+            <option value="">Select body part</option>
+            {BODY_PARTS.filter((part) => part !== "Push" && part !== "Pull").map((part) => (
+              <option key={part} value={part}>
+                {part}
+              </option>
+            ))}
+          </select>
+
+          <input
+            placeholder="Search within body part"
+            value={librarySearch}
+            onChange={(e) => setLibrarySearch(e.target.value)}
+            style={inputStyle}
+          />
+
+          <select
+            value={libraryChoice}
+            onChange={(e) => setLibraryChoice(e.target.value)}
+            style={selectStyle}
+            disabled={!bodyPartChoice}
+          >
+            <option value="">
+              {bodyPartChoice
+                ? `Choose ${bodyPartChoice} exercise (${bodyPartFilteredLibrary.length})`
+                : "Select a body part first"}
+            </option>
+            {bodyPartFilteredLibrary.slice(0, 250).map((exercise) => (
+              <option key={exercise.name} value={exercise.name}>
+                {exercise.name}
+                {exercise.custom ? " • Custom" : ""}
+              </option>
+            ))}
+          </select>
+
+          <button onClick={addExercise} style={primaryButtonStyle}>
+            Add Exercise
+          </button>
+        </div>
+
+        <p style={helperTextStyle}>
+          Choose the muscle group first, then pick the movement.
+        </p>
+      </div>
+    );
   }
 
   if (authLoading) {
@@ -1524,80 +1856,46 @@ export default function WorkoutPage() {
           <h2 style={sectionTitle}>Add Exercise</h2>
         </div>
 
-        <div style={inputGridStyle}>
-          <input
-            placeholder="Search exercise library"
-            value={librarySearch}
-            onChange={(e) => setLibrarySearch(e.target.value)}
-            style={inputStyle}
-          />
-
-          <select
-            value={libraryFilter}
-            onChange={(e) => setLibraryFilter(e.target.value)}
-            style={selectStyle}
+        <div style={modeButtonRowStyle}>
+          <button
+            onClick={() => {
+              setAddExerciseMode("library");
+              setLibraryChoice("");
+              setStatus("Choose from library.");
+            }}
+            style={addExerciseMode === "library" ? modeButtonActiveStyle : modeButtonStyle}
           >
-            <option value="All">All body parts</option>
-            {BODY_PARTS.filter((part) => part !== "Push" && part !== "Pull" && part !== "Full Body").map((part) => (
-              <option key={part} value={part}>
-                {part}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={libraryChoice}
-            onChange={(e) => setLibraryChoice(e.target.value)}
-            style={selectStyle}
+            Choose from Lib
+          </button>
+          <button
+            onClick={() => {
+              setAddExerciseMode("custom");
+              setStatus("Enter a custom exercise.");
+            }}
+            style={addExerciseMode === "custom" ? modeButtonActiveStyle : modeButtonStyle}
           >
-            <option value="">Choose from library ({filteredExerciseLibrary.length})</option>
-            {filteredExerciseLibrary.slice(0, 250).map((exercise) => (
-              <option key={exercise.name} value={exercise.name}>
-                {exercise.name} • {exercise.bodyPart}
-                {exercise.custom ? " • Custom" : ""}
-              </option>
-            ))}
-          </select>
-
-          <input
-            placeholder="Or type custom exercise"
-            value={newExerciseName}
-            onChange={(e) => setNewExerciseName(e.target.value)}
-            style={inputStyle}
-          />
-
-          <select
-            value={newBodyPart}
-            onChange={(e) => setNewBodyPart(e.target.value)}
-            style={selectStyle}
+            Enter Custom
+          </button>
+          <button
+            onClick={() => {
+              setAddExerciseMode("bodypart");
+              setLibraryChoice("");
+              setStatus("Pick a body part first.");
+            }}
+            style={addExerciseMode === "bodypart" ? modeButtonActiveStyle : modeButtonStyle}
           >
-            <option value="">Select body part</option>
-            {BODY_PARTS.map((part) => (
-              <option key={part} value={part}>
-                {part}
-              </option>
-            ))}
-          </select>
-
-          <button onClick={addExercise} style={primaryButtonStyle}>
-            Add Exercise
+            Body Part
           </button>
         </div>
 
-        <p style={helperTextStyle}>
-          Your library is now expanded in-app, and any truly custom exercise you add will still be saved locally on this device.
-        </p>
+        {renderAddExercisePanel()}
 
         {favoriteExercises.length > 0 && (
           <div style={{ marginTop: 18 }}>
             <p style={subtleLabelStyle}>Favorites</p>
             <div style={chipWrapStyle}>
               {favoriteExercises.map((name) => (
-                <button
-                  key={name}
-                  onClick={() => addRecentExercise(name)}
-                  style={chipButtonStyle}
-                >
+                <button key={name} onClick={() => addRecentExercise(name)} style={chipButtonStyle}>
                   {name}
                 </button>
               ))}
@@ -1610,11 +1908,7 @@ export default function WorkoutPage() {
             <p style={subtleLabelStyle}>Recent</p>
             <div style={chipWrapStyle}>
               {recentExercises.map((name) => (
-                <button
-                  key={name}
-                  onClick={() => addRecentExercise(name)}
-                  style={chipButtonStyle}
-                >
+                <button key={name} onClick={() => addRecentExercise(name)} style={chipButtonStyle}>
                   {name}
                 </button>
               ))}
@@ -1635,81 +1929,170 @@ export default function WorkoutPage() {
         </div>
 
         <p style={helperTextStyle}>
-          Cardio is fully tracked in the UI now. It will also save into Supabase once you add a dedicated <code>workout_cardio</code> table.
+          Faster cardio logging: quick time controls, 0.5 mile steps, and manual entry whenever needed.
         </p>
 
         {cardioEntries.length > 0 ? (
           <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
-            {cardioEntries.map((entry, index) => (
-              <div key={entry.id} style={cardioCardStyle}>
-                <div style={cardioHeaderStyle}>
-                  <div style={cardioTitleStyle}>Cardio {index + 1}</div>
-                  <div style={buttonRowStyle}>
-                    <button
-                      onClick={() => toggleCardioCompleted(entry.id)}
-                      style={entry.completed ? completeButtonActiveStyle : completeButtonStyle}
+            {cardioEntries.map((entry, index) => {
+              const totalSeconds =
+                toNumber(entry.minutes) * 60 + Math.min(59, toNumber(entry.seconds));
+              const displayMinutes = Math.floor(totalSeconds / 60);
+              const displaySeconds = totalSeconds % 60;
+
+              return (
+                <div key={entry.id} style={cardioCardStyle}>
+                  <div style={cardioHeaderStyle}>
+                    <div style={cardioTitleStyle}>Cardio {index + 1}</div>
+                    <div style={buttonRowStyle}>
+                      <button
+                        onClick={() => toggleCardioCompleted(entry.id)}
+                        style={entry.completed ? completeButtonActiveStyle : completeButtonStyle}
+                      >
+                        {entry.completed ? "Completed" : "Complete Cardio"}
+                      </button>
+                      <button
+                        onClick={() => removeCardioEntry(entry.id)}
+                        style={dangerButtonStyle}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={inputGridStyle}>
+                    <select
+                      value={entry.method}
+                      onChange={(e) => updateCardioField(entry.id, "method", e.target.value)}
+                      style={selectStyle}
                     >
-                      {entry.completed ? "Completed" : "Complete Cardio"}
-                    </button>
-                    <button
-                      onClick={() => removeCardioEntry(entry.id)}
-                      style={dangerButtonStyle}
-                    >
-                      Remove
-                    </button>
+                      {CARDIO_METHODS.map((method) => (
+                        <option key={method} value={method}>
+                          {method}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div style={cardioQuickSectionStyle}>
+                    <div style={cardioSectionTitleStyle}>Time</div>
+
+                    <div style={cardioPillRowStyle}>
+                      <button
+                        onClick={() => adjustCardioMinutes(entry.id, -5)}
+                        style={secondaryButtonStyle}
+                      >
+                        -5 min
+                      </button>
+                      <button
+                        onClick={() => adjustCardioMinutes(entry.id, -1)}
+                        style={secondaryButtonStyle}
+                      >
+                        -1 min
+                      </button>
+                      <button
+                        onClick={() => adjustCardioMinutes(entry.id, 1)}
+                        style={secondaryButtonStyle}
+                      >
+                        +1 min
+                      </button>
+                      <button
+                        onClick={() => adjustCardioMinutes(entry.id, 5)}
+                        style={secondaryButtonStyle}
+                      >
+                        +5 min
+                      </button>
+                    </div>
+
+                    <div style={cardioPillRowStyle}>
+                      <button
+                        onClick={() => adjustCardioSeconds(entry.id, -15)}
+                        style={secondaryButtonStyle}
+                      >
+                        -15 sec
+                      </button>
+                      <button
+                        onClick={() => adjustCardioSeconds(entry.id, 15)}
+                        style={secondaryButtonStyle}
+                      >
+                        +15 sec
+                      </button>
+                      <div style={cardioValuePillStyle}>
+                        {String(displayMinutes).padStart(2, "0")}:
+                        {String(displaySeconds).padStart(2, "0")}
+                      </div>
+                    </div>
+
+                    <div style={inputGridStyle}>
+                      <input
+                        placeholder="Minutes"
+                        value={entry.minutes}
+                        onChange={(e) =>
+                          updateCardioField(entry.id, "minutes", e.target.value)
+                        }
+                        style={smallInputStyle}
+                        inputMode="numeric"
+                      />
+
+                      <input
+                        placeholder="Seconds"
+                        value={entry.seconds}
+                        onChange={(e) =>
+                          updateCardioField(entry.id, "seconds", e.target.value)
+                        }
+                        style={smallInputStyle}
+                        inputMode="numeric"
+                      />
+                    </div>
+                  </div>
+
+                  <div style={cardioQuickSectionStyle}>
+                    <div style={cardioSectionTitleStyle}>Miles</div>
+
+                    <div style={cardioPillRowStyle}>
+                      <button
+                        onClick={() => adjustCardioMiles(entry.id, -0.5)}
+                        style={secondaryButtonStyle}
+                      >
+                        -0.5
+                      </button>
+                      <div style={cardioValuePillStyle}>
+                        {entry.miles && toNumber(entry.miles) > 0 ? entry.miles : "0"} mi
+                      </div>
+                      <button
+                        onClick={() => adjustCardioMiles(entry.id, 0.5)}
+                        style={secondaryButtonStyle}
+                      >
+                        +0.5
+                      </button>
+                    </div>
+
+                    <div style={inputGridStyle}>
+                      <input
+                        placeholder="Miles"
+                        value={entry.miles}
+                        onChange={(e) => updateCardioField(entry.id, "miles", e.target.value)}
+                        style={smallInputStyle}
+                        inputMode="decimal"
+                      />
+                    </div>
+                  </div>
+
+                  <div style={inputGridStyle}>
+                    <input
+                      placeholder="Notes (optional)"
+                      value={entry.notes || ""}
+                      onChange={(e) => updateCardioField(entry.id, "notes", e.target.value)}
+                      style={inputStyle}
+                    />
                   </div>
                 </div>
-
-                <div style={inputGridStyle}>
-                  <select
-                    value={entry.method}
-                    onChange={(e) => updateCardioField(entry.id, "method", e.target.value)}
-                    style={selectStyle}
-                  >
-                    {CARDIO_METHODS.map((method) => (
-                      <option key={method} value={method}>
-                        {method}
-                      </option>
-                    ))}
-                  </select>
-
-                  <input
-                    placeholder="Miles"
-                    value={entry.miles}
-                    onChange={(e) => updateCardioField(entry.id, "miles", e.target.value)}
-                    style={smallInputStyle}
-                    inputMode="decimal"
-                  />
-
-                  <input
-                    placeholder="Minutes"
-                    value={entry.minutes}
-                    onChange={(e) => updateCardioField(entry.id, "minutes", e.target.value)}
-                    style={smallInputStyle}
-                    inputMode="numeric"
-                  />
-
-                  <input
-                    placeholder="Seconds"
-                    value={entry.seconds}
-                    onChange={(e) => updateCardioField(entry.id, "seconds", e.target.value)}
-                    style={smallInputStyle}
-                    inputMode="numeric"
-                  />
-
-                  <input
-                    placeholder="Notes (optional)"
-                    value={entry.notes || ""}
-                    onChange={(e) => updateCardioField(entry.id, "notes", e.target.value)}
-                    style={inputStyle}
-                  />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <p style={{ ...helperTextStyle, marginTop: 12 }}>
-            Track treadmill work, jogging, swimming, biking, stairmaster, SkiErg, sled pushes, and more with time and miles.
+            Track treadmill work, jogging, swimming, biking, stairmaster, SkiErg, sled pushes, and more with quick inputs.
           </p>
         )}
       </section>
@@ -1749,20 +2132,22 @@ export default function WorkoutPage() {
                 >
                   Reset Sets
                 </button>
-                <button
-                  onClick={() => removeExercise(index)}
-                  style={dangerButtonStyle}
-                >
+                <button onClick={() => removeExercise(index)} style={dangerButtonStyle}>
                   Remove
                 </button>
               </div>
             </div>
 
             {!!exercise.restSeconds && (
-              <div style={restTagStyle}>Recommended rest: {formatRestLabel(exercise.restSeconds)}</div>
+              <div style={restTagStyle}>
+                Recommended rest: {formatRestLabel(exercise.restSeconds)}
+              </div>
             )}
 
-            {(exercise.coachingNote || exercise.reason || exercise.notes || exercise.repRange) && (
+            {(exercise.coachingNote ||
+              exercise.reason ||
+              exercise.notes ||
+              exercise.repRange) && (
               <div style={exerciseInfoCardStyle}>
                 {exercise.repRange && (
                   <div style={exerciseInfoLineStyle}>
@@ -2007,6 +2392,8 @@ const cardioCardStyle: CSSProperties = {
   border: "1px solid rgba(255,255,255,0.06)",
   borderRadius: "16px",
   padding: "14px",
+  display: "grid",
+  gap: "14px",
 };
 
 const cardioHeaderStyle: CSSProperties = {
@@ -2015,13 +2402,47 @@ const cardioHeaderStyle: CSSProperties = {
   alignItems: "center",
   gap: "10px",
   flexWrap: "wrap",
-  marginBottom: "12px",
+  marginBottom: "2px",
 };
 
 const cardioTitleStyle: CSSProperties = {
   color: "#fff",
   fontWeight: 800,
   fontSize: "15px",
+};
+
+const cardioQuickSectionStyle: CSSProperties = {
+  background: "rgba(255,255,255,0.025)",
+  border: "1px solid rgba(255,255,255,0.05)",
+  borderRadius: "14px",
+  padding: "12px",
+  display: "grid",
+  gap: "10px",
+};
+
+const cardioSectionTitleStyle: CSSProperties = {
+  color: "#efefef",
+  fontSize: "13px",
+  fontWeight: 800,
+};
+
+const cardioPillRowStyle: CSSProperties = {
+  display: "flex",
+  gap: "8px",
+  flexWrap: "wrap",
+  alignItems: "center",
+};
+
+const cardioValuePillStyle: CSSProperties = {
+  background: "rgba(255,255,255,0.06)",
+  border: "1px solid rgba(255,255,255,0.08)",
+  borderRadius: "12px",
+  color: "#fff",
+  fontSize: "13px",
+  fontWeight: 800,
+  padding: "10px 14px",
+  minWidth: "96px",
+  textAlign: "center",
 };
 
 const emptyStateCardStyle: CSSProperties = {
@@ -2077,6 +2498,10 @@ const inputGridStyle: CSSProperties = {
   marginTop: "12px",
 };
 
+const addExercisePanelStyle: CSSProperties = {
+  marginTop: "14px",
+};
+
 const inputStyle: CSSProperties = {
   padding: "10px",
   borderRadius: "10px",
@@ -2110,6 +2535,12 @@ const buttonRowStyle: CSSProperties = {
   flexWrap: "wrap",
 };
 
+const modeButtonRowStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: "10px",
+};
+
 const primaryButtonStyle: CSSProperties = {
   backgroundColor: "#ff1a1a",
   border: "none",
@@ -2137,6 +2568,26 @@ const dangerButtonStyle: CSSProperties = {
   borderRadius: "10px",
   color: "white",
   fontWeight: 700,
+  cursor: "pointer",
+};
+
+const modeButtonStyle: CSSProperties = {
+  backgroundColor: "#1b1b1b",
+  border: "1px solid #2c2c2c",
+  padding: "12px 14px",
+  borderRadius: "12px",
+  color: "#efefef",
+  fontWeight: 800,
+  cursor: "pointer",
+};
+
+const modeButtonActiveStyle: CSSProperties = {
+  backgroundColor: "rgba(255,26,26,0.16)",
+  border: "1px solid rgba(255,77,77,0.45)",
+  padding: "12px 14px",
+  borderRadius: "12px",
+  color: "#ffffff",
+  fontWeight: 800,
   cursor: "pointer",
 };
 

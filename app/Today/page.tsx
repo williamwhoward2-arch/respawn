@@ -21,10 +21,10 @@ export default function TodayPage() {
   const [savingRestDay, setSavingRestDay] = useState(false);
 
   useEffect(() => {
-    void initializeTodayPage();
+    void initializeBuildPage();
   }, []);
 
-  async function initializeTodayPage() {
+  async function initializeBuildPage() {
     setLoading(true);
     setStatus("Checking account...");
 
@@ -96,9 +96,11 @@ export default function TodayPage() {
     return (
       <main style={pageStyle}>
         <section style={heroCardStyle}>
-          <p style={eyebrowStyle}>RESPAWN TODAY</p>
-          <h1 style={heroTitleStyle}>Loading today...</h1>
-          <p style={heroSubStyle}>Checking your account and preparing your training options.</p>
+          <p style={eyebrowStyle}>RESPAWN BUILD</p>
+          <h1 style={heroTitleStyle}>Loading build tools...</h1>
+          <p style={heroSubStyle}>
+            Preparing your workout options and session flow.
+          </p>
         </section>
       </main>
     );
@@ -107,46 +109,71 @@ export default function TodayPage() {
   return (
     <main style={pageStyle}>
       <section style={heroCardStyle}>
-        <p style={eyebrowStyle}>RESPAWN TODAY</p>
-        <h1 style={heroTitleStyle}>Choose Today’s Path</h1>
+        <p style={eyebrowStyle}>RESPAWN BUILD</p>
+        <h1 style={heroTitleStyle}>Smarter Workouts. Real Progress.</h1>
         <p style={heroSubStyle}>
-          Generate a workout when you are training, or log a rest day when recovery
-          is the move.
+          ReSpawn helps you build better workouts using AI and your training
+          history — designed around your goals, experience, equipment, and
+          long-term progress.
         </p>
-
-        <div style={accountBarStyle}>
-          <div style={accountInfoStyle}>
-            <span style={accountLabelStyle}>Signed in as</span>
-            <span style={accountValueStyle}>{authUser?.email || authUser?.id}</span>
-          </div>
-        </div>
       </section>
 
       <section style={cardStyle}>
         <div style={sectionHeaderStyle}>
-          <h2 style={sectionTitle}>Train Today</h2>
+          <h2 style={sectionTitle}>Build a Workout</h2>
         </div>
+
         <p style={sectionSubStyle}>
-          Build a session based on your goal, experience, and equipment.
+          Create a workout built for real progress.
         </p>
 
-        <div style={{ marginTop: 16 }}>
+        <p style={bodyCopyStyle}>
+          Use AI to generate a personalized workout based on your goal, training
+          background, available equipment, and recent workout history.
+        </p>
+
+        <div style={featureListStyle}>
+          <div style={featureItemStyle}>
+            <div style={featureBulletStyle} />
+            <span>Start training right away</span>
+          </div>
+          <div style={featureItemStyle}>
+            <div style={featureBulletStyle} />
+            <span>Edit sets, weight, and reps</span>
+          </div>
+          <div style={featureItemStyle}>
+            <div style={featureBulletStyle} />
+            <span>Add or remove exercises</span>
+          </div>
+          <div style={featureItemStyle}>
+            <div style={featureBulletStyle} />
+            <span>Customize the session to fit your day</span>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 18 }}>
           <WorkoutGenerator />
         </div>
       </section>
 
       <section style={cardStyle}>
         <div style={sectionHeaderStyle}>
-          <h2 style={sectionTitle}>Log Rest Day</h2>
+          <h2 style={sectionTitle}>Need a Recovery Day?</h2>
         </div>
+
         <p style={sectionSubStyle}>
-          Save today as a recovery day so your app tracks consistency more honestly.
+          Log a rest day when recovery is the right call.
+        </p>
+
+        <p style={bodyCopyStyle}>
+          Rest days still matter. Logging them keeps your training history
+          cleaner and makes your progress data more honest over time.
         </p>
 
         <textarea
           value={restDayNote}
           onChange={(e) => setRestDayNote(e.target.value)}
-          placeholder="Optional note: sore, travel, active recovery, poor sleep, etc."
+          placeholder="Optional note: sore, travel, active recovery, poor sleep, low energy, etc."
           style={textAreaStyle}
           rows={4}
         />
@@ -162,6 +189,19 @@ export default function TodayPage() {
         </div>
 
         {status ? <p style={statusStyle}>{status}</p> : null}
+      </section>
+
+      <section style={supportCardStyle}>
+        <h3 style={supportTitleStyle}>Want full control?</h3>
+        <p style={supportTextStyle}>
+          You can also build your own custom workout from scratch and log
+          everything as you go.
+        </p>
+        <p style={supportTextStyle}>
+          Every workout — AI-built or fully custom — feeds your progress
+          tracking, workout reviews, strength insights, and long-term
+          performance data.
+        </p>
       </section>
     </main>
   );
@@ -195,42 +235,18 @@ const eyebrowStyle: CSSProperties = {
 
 const heroTitleStyle: CSSProperties = {
   color: "#ffffff",
-  fontSize: "30px",
-  lineHeight: 1.1,
-  fontWeight: 800,
-  margin: "0 0 8px",
+  fontSize: "32px",
+  lineHeight: 1.08,
+  fontWeight: 900,
+  margin: "0 0 10px",
 };
 
 const heroSubStyle: CSSProperties = {
   color: "#d0d0d0",
   fontSize: "15px",
   margin: 0,
-};
-
-const accountBarStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: "12px",
-  marginTop: "18px",
-  flexWrap: "wrap",
-};
-
-const accountInfoStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "4px",
-};
-
-const accountLabelStyle: CSSProperties = {
-  color: "#aaa",
-  fontSize: "12px",
-};
-
-const accountValueStyle: CSSProperties = {
-  color: "#fff",
-  fontSize: "14px",
-  fontWeight: 700,
+  lineHeight: 1.55,
+  maxWidth: "760px",
 };
 
 const cardStyle: CSSProperties = {
@@ -240,6 +256,14 @@ const cardStyle: CSSProperties = {
   padding: "20px",
   boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
   marginBottom: "16px",
+};
+
+const supportCardStyle: CSSProperties = {
+  background: "rgba(255,255,255,0.03)",
+  border: "1px solid rgba(255,255,255,0.06)",
+  borderRadius: "20px",
+  padding: "20px",
+  boxShadow: "0 8px 24px rgba(0,0,0,0.2)",
 };
 
 const sectionHeaderStyle: CSSProperties = {
@@ -258,10 +282,42 @@ const sectionTitle: CSSProperties = {
 };
 
 const sectionSubStyle: CSSProperties = {
-  color: "#b8b8b8",
-  fontSize: "14px",
+  color: "#ffffff",
+  fontSize: "16px",
   lineHeight: 1.5,
   margin: 0,
+  fontWeight: 700,
+};
+
+const bodyCopyStyle: CSSProperties = {
+  color: "#b8b8b8",
+  fontSize: "14px",
+  lineHeight: 1.6,
+  margin: "12px 0 0",
+  maxWidth: "760px",
+};
+
+const featureListStyle: CSSProperties = {
+  display: "grid",
+  gap: "10px",
+  marginTop: "16px",
+};
+
+const featureItemStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  gap: "12px",
+  color: "#efefef",
+  lineHeight: 1.5,
+};
+
+const featureBulletStyle: CSSProperties = {
+  width: "8px",
+  height: "8px",
+  borderRadius: "999px",
+  background: "#ff6b6b",
+  flexShrink: 0,
+  marginTop: "7px",
 };
 
 const textAreaStyle: CSSProperties = {
@@ -299,6 +355,20 @@ const disabledButtonStyle: CSSProperties = {
   ...secondaryButtonStyle,
   opacity: 0.6,
   cursor: "not-allowed",
+};
+
+const supportTitleStyle: CSSProperties = {
+  color: "#ffffff",
+  fontSize: "18px",
+  fontWeight: 800,
+  margin: "0 0 10px",
+};
+
+const supportTextStyle: CSSProperties = {
+  color: "#b8b8b8",
+  fontSize: "14px",
+  lineHeight: 1.6,
+  margin: "0 0 10px",
 };
 
 const statusStyle: CSSProperties = {
