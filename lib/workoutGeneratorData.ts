@@ -154,12 +154,12 @@ export type WorkoutStyle =
   | "strength_size";
 
 export type GeneratedWorkoutStyle =
-  | "Balanced Hypertrophy"
-  | "Bodybuilding Builder"
-  | "High Volume Mass"
-  | "Old School Mass"
-  | "Intensity Focus"
-  | "Pump Session"
+  | "Balanced Training"
+  | "Muscle Focus"
+  | "High Volume"
+  | "Heavy Volume"
+  | "High Intensity"
+  | "Short Rest Burn"
   | "Strength + Size";
 
 export type VolumeTier = "moderate" | "high" | "brutal";
