@@ -8,7 +8,7 @@ import { supabase } from "@/lib/supabaseClient";
 const navItems = [
   { label: "AI Coach", href: "/dashboard" },
   { label: "Build", href: "/Today" },
-  { label: "Workout", href: "/Workout" },
+  { label: "Track", href: "/Workout" },
   { label: "Progress", href: "/Progress" },
   { label: "Profile", href: "/Profile" },
 ];

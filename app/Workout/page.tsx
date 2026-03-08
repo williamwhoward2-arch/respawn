@@ -97,12 +97,21 @@ type SavedWorkoutState = {
   libraryChoice: string;
   newExerciseName: string;
   newBodyPart: string;
-  addExerciseMode: "library" | "custom" | "bodypart";
-  bodyPartChoice: string;
+  addExerciseMode: "library" | "custom";
+};
+
+type ConfirmAction = {
+  open: boolean;
+  title: string;
+  message: string;
+  confirmLabel: string;
+  onConfirm: null | (() => void);
 };
 
 const CARDIO_METHODS = [
+  "Walking",
   "Treadmill Walk",
+  "Incline Walk",
   "Treadmill Run",
   "Jog",
   "Outdoor Run",
@@ -112,7 +121,6 @@ const CARDIO_METHODS = [
   "Elliptical",
   "Rowing Machine",
   "Swimming",
-  "Incline Walk",
   "Hiking",
   "Sled Push",
   "Jump Rope",
@@ -377,6 +385,8 @@ function getWorkoutWarmupText(exercises: Exercise[]) {
 }
 
 function getWorkoutFocusLine(title: string, exercises: Exercise[]) {
+  if (exercises.length === 0) return "Track • Progress";
+
   const bodyPartCounts = exercises.reduce<Record<string, number>>((acc, exercise) => {
     acc[exercise.bodyPart] = (acc[exercise.bodyPart] || 0) + 1;
     return acc;
@@ -562,10 +572,7 @@ export default function WorkoutPage() {
   const [libraryFilter, setLibraryFilter] = useState("All");
   const [newExerciseName, setNewExerciseName] = useState("");
   const [newBodyPart, setNewBodyPart] = useState("");
-  const [addExerciseMode, setAddExerciseMode] = useState<
-    "library" | "custom" | "bodypart"
-  >("library");
-  const [bodyPartChoice, setBodyPartChoice] = useState("");
+  const [addExerciseMode, setAddExerciseMode] = useState<"library" | "custom">("library");
 
   const [secondsElapsed, setSecondsElapsed] = useState(0);
   const [timerRunning, setTimerRunning] = useState(false);
@@ -573,17 +580,80 @@ export default function WorkoutPage() {
   const [recentExercises, setRecentExercises] = useState<string[]>([]);
   const [favoriteExercises, setFavoriteExercises] = useState<string[]>([]);
   const [customLibrary, setCustomLibrary] = useState<LibraryExercise[]>([]);
-  const [workoutTitle, setWorkoutTitle] = useState("Build Your Session");
+  const [workoutTitle, setWorkoutTitle] = useState("Track Your Workout");
 
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [cardioEntries, setCardioEntries] = useState<CardioEntry[]>([]);
   const [historyMap, setHistoryMap] = useState<ExerciseHistoryMap>({});
+
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction>({
+    open: false,
+    title: "",
+    message: "",
+    confirmLabel: "Yes",
+    onConfirm: null,
+  });
 
   const exerciseCardRefs = useRef<Record<string, HTMLElement | null>>({});
 
   useEffect(() => {
     void initializeWorkoutPage();
   }, []);
+
+  useEffect(() => {
+    if (!timerRunning) return;
+
+    const interval = setInterval(() => {
+      setSecondsElapsed((prev) => prev + 1);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [timerRunning]);
+
+  useEffect(() => {
+    localStorage.setItem("respawn_recent_exercises", JSON.stringify(recentExercises));
+  }, [recentExercises]);
+
+  useEffect(() => {
+    localStorage.setItem("respawn_custom_exercise_library", JSON.stringify(customLibrary));
+  }, [customLibrary]);
+
+  useEffect(() => {
+    if (authLoading || finished) return;
+
+    const draft: SavedWorkoutState = {
+      workoutTitle,
+      exercises,
+      cardioEntries,
+      secondsElapsed,
+      timerRunning: false,
+      libraryChoice,
+      newExerciseName,
+      newBodyPart,
+      addExerciseMode,
+    };
+
+    localStorage.setItem(WORKOUT_DRAFT_KEY, JSON.stringify(draft));
+  }, [
+    authLoading,
+    finished,
+    workoutTitle,
+    exercises,
+    cardioEntries,
+    secondsElapsed,
+    libraryChoice,
+    newExerciseName,
+    newBodyPart,
+    addExerciseMode,
+  ]);
+
+  useEffect(() => {
+    if (exercises.length === 0 && cardioEntries.length === 0) {
+      if (workoutTitle !== "Track Your Session") {
+        setWorkoutTitle("Track Your Session");
+      }
+    }
+  }, [exercises.length, cardioEntries.length, workoutTitle]);
 
   async function loadExerciseHistory(userId: string) {
     const { data, error } = await supabase
@@ -633,6 +703,42 @@ export default function WorkoutPage() {
     return nextHistory;
   }
 
+  async function loadUserFavorites(userId: string) {
+    const { data, error } = await supabase
+      .from("user_favorite_exercises")
+      .select("exercise_name")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Failed to load favorite exercises:", error);
+      return [];
+    }
+
+    return (data || []).map((row) => String(row.exercise_name || ""));
+  }
+
+  async function addFavoriteForUser(userId: string, exerciseName: string) {
+    const { error } = await supabase.from("user_favorite_exercises").insert({
+      user_id: userId,
+      exercise_name: exerciseName,
+    });
+
+    if (error && !error.message.toLowerCase().includes("duplicate")) {
+      throw error;
+    }
+  }
+
+  async function removeFavoriteForUser(userId: string, exerciseName: string) {
+    const { error } = await supabase
+      .from("user_favorite_exercises")
+      .delete()
+      .eq("user_id", userId)
+      .eq("exercise_name", exerciseName);
+
+    if (error) throw error;
+  }
+
   async function initializeWorkoutPage() {
     setAuthLoading(true);
 
@@ -666,21 +772,21 @@ export default function WorkoutPage() {
     });
 
     const savedRecent = localStorage.getItem("respawn_recent_exercises");
-    const savedFavorites = localStorage.getItem("respawn_favorite_exercises");
     const savedCustomLibrary = localStorage.getItem("respawn_custom_exercise_library");
 
     const parsedRecent: string[] = savedRecent ? JSON.parse(savedRecent) : [];
-    const parsedFavorites: string[] = savedFavorites ? JSON.parse(savedFavorites) : [];
     const parsedCustomLibrary: LibraryExercise[] = savedCustomLibrary
       ? JSON.parse(savedCustomLibrary)
       : [];
 
     setRecentExercises(parsedRecent);
-    setFavoriteExercises(parsedFavorites);
     setCustomLibrary(parsedCustomLibrary);
 
     const loadedHistoryMap = await loadExerciseHistory(user.id);
     setHistoryMap(loadedHistoryMap);
+
+    const loadedFavorites = await loadUserFavorites(user.id);
+    setFavoriteExercises(loadedFavorites);
 
     const rawGeneratedWorkout = localStorage.getItem("respawn_generated_workout");
 
@@ -724,7 +830,7 @@ export default function WorkoutPage() {
                       completed: false,
                     },
                   ],
-            favorite: parsedFavorites.includes(exercise.exercise_name),
+            favorite: loadedFavorites.includes(exercise.exercise_name),
           };
         });
 
@@ -740,7 +846,6 @@ export default function WorkoutPage() {
           setNewExerciseName("");
           setNewBodyPart("");
           setAddExerciseMode("library");
-          setBodyPartChoice("");
           setStatus(`${parsed.workout_name} loaded.`);
         }
 
@@ -759,7 +864,7 @@ export default function WorkoutPage() {
     if (savedDraft) {
       try {
         const parsedDraft: SavedWorkoutState = JSON.parse(savedDraft);
-        setWorkoutTitle(parsedDraft.workoutTitle || "Build Your Session");
+        setWorkoutTitle(parsedDraft.workoutTitle || "TrackYour Session");
         setExercises(Array.isArray(parsedDraft.exercises) ? parsedDraft.exercises : []);
         setCardioEntries(Array.isArray(parsedDraft.cardioEntries) ? parsedDraft.cardioEntries : []);
         setSecondsElapsed(parsedDraft.secondsElapsed || 0);
@@ -768,7 +873,6 @@ export default function WorkoutPage() {
         setNewExerciseName(parsedDraft.newExerciseName || "");
         setNewBodyPart(parsedDraft.newBodyPart || "");
         setAddExerciseMode(parsedDraft.addExerciseMode || "library");
-        setBodyPartChoice(parsedDraft.bodyPartChoice || "");
         setStatus("Recovered your in-progress workout.");
         setAuthLoading(false);
         return;
@@ -780,58 +884,30 @@ export default function WorkoutPage() {
     setAuthLoading(false);
   }
 
-  useEffect(() => {
-    if (!timerRunning) return;
+  function openConfirm(options: Omit<ConfirmAction, "open">) {
+    setConfirmAction({
+      open: true,
+      title: options.title,
+      message: options.message,
+      confirmLabel: options.confirmLabel,
+      onConfirm: options.onConfirm,
+    });
+  }
 
-    const interval = setInterval(() => {
-      setSecondsElapsed((prev) => prev + 1);
-    }, 1000);
+  function closeConfirm() {
+    setConfirmAction({
+      open: false,
+      title: "",
+      message: "",
+      confirmLabel: "Yes",
+      onConfirm: null,
+    });
+  }
 
-    return () => clearInterval(interval);
-  }, [timerRunning]);
-
-  useEffect(() => {
-    localStorage.setItem("respawn_recent_exercises", JSON.stringify(recentExercises));
-  }, [recentExercises]);
-
-  useEffect(() => {
-    localStorage.setItem("respawn_favorite_exercises", JSON.stringify(favoriteExercises));
-  }, [favoriteExercises]);
-
-  useEffect(() => {
-    localStorage.setItem("respawn_custom_exercise_library", JSON.stringify(customLibrary));
-  }, [customLibrary]);
-
-  useEffect(() => {
-    if (authLoading || finished) return;
-
-    const draft: SavedWorkoutState = {
-      workoutTitle,
-      exercises,
-      cardioEntries,
-      secondsElapsed,
-      timerRunning: false,
-      libraryChoice,
-      newExerciseName,
-      newBodyPart,
-      addExerciseMode,
-      bodyPartChoice,
-    };
-
-    localStorage.setItem(WORKOUT_DRAFT_KEY, JSON.stringify(draft));
-  }, [
-    authLoading,
-    finished,
-    workoutTitle,
-    exercises,
-    cardioEntries,
-    secondsElapsed,
-    libraryChoice,
-    newExerciseName,
-    newBodyPart,
-    addExerciseMode,
-    bodyPartChoice,
-  ]);
+  function runConfirmedAction() {
+    confirmAction.onConfirm?.();
+    closeConfirm();
+  }
 
   const allExerciseLibrary = useMemo(() => {
     const merged = [...customLibrary, ...EXPANDED_EXERCISE_LIBRARY, ...BASE_EXERCISE_LIBRARY];
@@ -854,16 +930,6 @@ export default function WorkoutPage() {
       return matchesBodyPart && matchesSearch;
     });
   }, [allExerciseLibrary, libraryFilter, librarySearch]);
-
-  const bodyPartFilteredLibrary = useMemo(() => {
-    return allExerciseLibrary.filter((item) => {
-      const matchesBodyPart = bodyPartChoice ? item.bodyPart === bodyPartChoice : true;
-      const matchesSearch =
-        librarySearch.trim() === "" ||
-        item.name.toLowerCase().includes(librarySearch.trim().toLowerCase());
-      return matchesBodyPart && matchesSearch;
-    });
-  }, [allExerciseLibrary, bodyPartChoice, librarySearch]);
 
   const libraryMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -910,9 +976,12 @@ export default function WorkoutPage() {
   );
   const cardioMilesTotal = completedCardio.reduce((sum, entry) => sum + toNumber(entry.miles), 0);
 
+  const displayWorkoutTitle =
+    exercises.length === 0 && cardioEntries.length === 0 ? "Track Your Session" : workoutTitle;
+
   const workoutFocusLine = useMemo(
-    () => getWorkoutFocusLine(workoutTitle, exercises),
-    [workoutTitle, exercises]
+    () => getWorkoutFocusLine(displayWorkoutTitle, exercises),
+    [displayWorkoutTitle, exercises]
   );
 
   const warmupText = useMemo(() => getWorkoutWarmupText(exercises), [exercises]);
@@ -1101,48 +1170,63 @@ export default function WorkoutPage() {
   }
 
   function removeSet(exerciseIndex: number, setIndex: number) {
-    setExercises((prev) => {
-      const updated = [...prev];
-      const exercise = { ...updated[exerciseIndex] };
-      exercise.sets = exercise.sets.filter((_, i) => i !== setIndex);
+    openConfirm({
+      title: "Remove set?",
+      message: `This will remove Set ${setIndex + 1}.`,
+      confirmLabel: "Yes, remove",
+      onConfirm: () => {
+        setExercises((prev) => {
+          const updated = [...prev];
+          const exercise = { ...updated[exerciseIndex] };
+          exercise.sets = exercise.sets.filter((_, i) => i !== setIndex);
+          updated[exerciseIndex] = exercise;
 
-      if (exercise.sets.length === 0) {
-        exercise.sets = [{ weight: "", reps: "", completed: false }];
-      }
+          return updated.filter((item) => item.sets.length > 0);
+        });
 
-      updated[exerciseIndex] = exercise;
-      return updated;
+        setStatus("Set removed.");
+      },
     });
-
-    setStatus("Set removed.");
   }
 
   function resetExerciseSets(exerciseIndex: number) {
-    setExercises((prev) => {
-      const updated = [...prev];
-      const exercise = updated[exerciseIndex];
+    openConfirm({
+      title: "Clear all sets?",
+      message: "This will clear all weight, reps, and completion marks for this exercise.",
+      confirmLabel: "Yes, clear",
+      onConfirm: () => {
+        setExercises((prev) => {
+          const updated = [...prev];
+          const exercise = updated[exerciseIndex];
 
-      updated[exerciseIndex] = {
-        ...exercise,
-        sets: exercise.sets.map(() => ({
-          weight: "",
-          reps: "",
-          completed: false,
-        })),
-      };
+          updated[exerciseIndex] = {
+            ...exercise,
+            sets: exercise.sets.map(() => ({
+              weight: "",
+              reps: "",
+              completed: false,
+            })),
+          };
 
-      return updated;
+          return updated;
+        });
+
+        setStatus("All set values cleared.");
+      },
     });
-
-    setStatus("All set values cleared.");
   }
 
   function removeExercise(exerciseIndex: number) {
-    setExercises((prev) => {
-      const removed = prev[exerciseIndex]?.name;
-      const updated = prev.filter((_, i) => i !== exerciseIndex);
-      setStatus(removed ? `${removed} removed.` : "Exercise removed.");
-      return updated;
+    const removedName = exercises[exerciseIndex]?.name || "this exercise";
+
+    openConfirm({
+      title: "Remove exercise?",
+      message: `This will remove ${removedName} and all of its sets.`,
+      confirmLabel: "Yes, remove",
+      onConfirm: () => {
+        setExercises((prev) => prev.filter((_, i) => i !== exerciseIndex));
+        setStatus(`${removedName} removed.`);
+      },
     });
   }
 
@@ -1228,47 +1312,46 @@ export default function WorkoutPage() {
       return;
     }
 
-    if (addExerciseMode === "custom") {
-      if (!newExerciseName.trim()) {
-        setStatus("Enter a custom exercise name.");
-        return;
-      }
-
-      if (!newBodyPart) {
-        setStatus("Select a body part for your custom exercise.");
-        return;
-      }
-
-      addExerciseFromInput(newExerciseName, newBodyPart || "Other");
+    if (!newExerciseName.trim()) {
+      setStatus("Enter a custom exercise name.");
       return;
     }
 
-    if (addExerciseMode === "bodypart") {
-      if (!libraryChoice) {
-        setStatus("Choose an exercise after selecting a body part.");
-        return;
-      }
-
-      addExerciseFromInput(libraryChoice, libraryMap.get(libraryChoice) || bodyPartChoice || "Other");
+    if (!newBodyPart) {
+      setStatus("Select a body part for your custom exercise.");
+      return;
     }
+
+    addExerciseFromInput(newExerciseName, newBodyPart || "Other");
   }
 
   function addRecentExercise(name: string) {
     addExerciseFromInput(name, libraryMap.get(name) || "Other");
   }
 
-  function toggleFavorite(name: string) {
-    setFavoriteExercises((prev) => {
-      const exists = prev.includes(name);
+  async function toggleFavorite(name: string) {
+    if (!authUser?.id) {
+      setStatus("You must be signed in to save favorites.");
+      return;
+    }
 
+    const exists = favoriteExercises.includes(name);
+
+    try {
       if (exists) {
+        await removeFavoriteForUser(authUser.id, name);
+        setFavoriteExercises((prev) => prev.filter((item) => item !== name));
         setStatus(`${name} removed from favorites.`);
-        return prev.filter((item) => item !== name);
+        return;
       }
 
+      await addFavoriteForUser(authUser.id, name);
+      setFavoriteExercises((prev) => [name, ...prev]);
       setStatus(`${name} added to favorites.`);
-      return [name, ...prev];
-    });
+    } catch (error) {
+      console.error("Favorite update failed:", error);
+      setStatus("Could not update favorite.");
+    }
   }
 
   function startTimer() {
@@ -1297,7 +1380,7 @@ export default function WorkoutPage() {
       ...prev,
       {
         id: makeId(),
-        method: "Treadmill Walk",
+        method: "Walking",
         miles: "",
         minutes: "",
         seconds: "",
@@ -1433,8 +1516,15 @@ export default function WorkoutPage() {
   }
 
   function removeCardioEntry(cardioId: string) {
-    setCardioEntries((prev) => prev.filter((entry) => entry.id !== cardioId));
-    setStatus("Cardio removed.");
+    openConfirm({
+      title: "Remove cardio entry?",
+      message: "This cardio entry will be removed.",
+      confirmLabel: "Yes, remove",
+      onConfirm: () => {
+        setCardioEntries((prev) => prev.filter((entry) => entry.id !== cardioId));
+        setStatus("Cardio removed.");
+      },
+    });
   }
 
   async function persistCardioEntries(workoutId: number) {
@@ -1501,7 +1591,7 @@ export default function WorkoutPage() {
 
     const workoutPayload = {
       user_id: authUser.id,
-      workout_name: workoutTitle === "Build Your Session" ? "Custom Workout" : workoutTitle,
+      workout_name: displayWorkoutTitle === "Track Your Session" ? "Custom Workout" : displayWorkoutTitle,
       duration_seconds: secondsElapsed,
       day_type: exercises.length === 0 && completedCardio.length > 0 ? "cardio" : "workout",
       notes: [...workoutHighlights, cardioSummary].filter(Boolean).join(" • ") || null,
@@ -1601,9 +1691,7 @@ export default function WorkoutPage() {
               onChange={(e) => setLibraryChoice(e.target.value)}
               style={selectStyle}
             >
-              <option value="">
-                Choose from library ({filteredExerciseLibrary.length})
-              </option>
+              <option value="">Choose from library ({filteredExerciseLibrary.length})</option>
               {filteredExerciseLibrary.slice(0, 250).map((exercise) => (
                 <option key={exercise.name} value={exercise.name}>
                   {exercise.name} • {exercise.bodyPart}
@@ -1617,45 +1705,7 @@ export default function WorkoutPage() {
             </button>
           </div>
 
-          <p style={helperTextStyle}>
-            Fastest option. Search, choose, add.
-          </p>
-        </div>
-      );
-    }
-
-    if (addExerciseMode === "custom") {
-      return (
-        <div style={addExercisePanelStyle}>
-          <div style={inputGridStyle}>
-            <input
-              placeholder="Custom exercise name"
-              value={newExerciseName}
-              onChange={(e) => setNewExerciseName(e.target.value)}
-              style={inputStyle}
-            />
-
-            <select
-              value={newBodyPart}
-              onChange={(e) => setNewBodyPart(e.target.value)}
-              style={selectStyle}
-            >
-              <option value="">Select body part</option>
-              {BODY_PARTS.map((part) => (
-                <option key={part} value={part}>
-                  {part}
-                </option>
-              ))}
-            </select>
-
-            <button onClick={addExercise} style={primaryButtonStyle}>
-              Add Custom Exercise
-            </button>
-          </div>
-
-          <p style={helperTextStyle}>
-            Custom exercises are saved locally on this device and will show up in your library.
-          </p>
+          <p style={helperTextStyle}>Search, choose, add.</p>
         </div>
       );
     }
@@ -1663,55 +1713,33 @@ export default function WorkoutPage() {
     return (
       <div style={addExercisePanelStyle}>
         <div style={inputGridStyle}>
+          <input
+            placeholder="Custom exercise name"
+            value={newExerciseName}
+            onChange={(e) => setNewExerciseName(e.target.value)}
+            style={inputStyle}
+          />
+
           <select
-            value={bodyPartChoice}
-            onChange={(e) => {
-              setBodyPartChoice(e.target.value);
-              setLibraryChoice("");
-            }}
+            value={newBodyPart}
+            onChange={(e) => setNewBodyPart(e.target.value)}
             style={selectStyle}
           >
             <option value="">Select body part</option>
-            {BODY_PARTS.filter((part) => part !== "Push" && part !== "Pull").map((part) => (
+            {BODY_PARTS.map((part) => (
               <option key={part} value={part}>
                 {part}
               </option>
             ))}
           </select>
 
-          <input
-            placeholder="Search within body part"
-            value={librarySearch}
-            onChange={(e) => setLibrarySearch(e.target.value)}
-            style={inputStyle}
-          />
-
-          <select
-            value={libraryChoice}
-            onChange={(e) => setLibraryChoice(e.target.value)}
-            style={selectStyle}
-            disabled={!bodyPartChoice}
-          >
-            <option value="">
-              {bodyPartChoice
-                ? `Choose ${bodyPartChoice} exercise (${bodyPartFilteredLibrary.length})`
-                : "Select a body part first"}
-            </option>
-            {bodyPartFilteredLibrary.slice(0, 250).map((exercise) => (
-              <option key={exercise.name} value={exercise.name}>
-                {exercise.name}
-                {exercise.custom ? " • Custom" : ""}
-              </option>
-            ))}
-          </select>
-
           <button onClick={addExercise} style={primaryButtonStyle}>
-            Add Exercise
+            Add Custom Exercise
           </button>
         </div>
 
         <p style={helperTextStyle}>
-          Choose the muscle group first, then pick the movement.
+          Custom exercises are saved to your local library on this device.
         </p>
       </div>
     );
@@ -1795,7 +1823,7 @@ export default function WorkoutPage() {
     <main style={pageStyle}>
       <section style={heroCardStyle}>
         <p style={eyebrowStyle}>RESPAWN WORKOUT</p>
-        <h1 style={heroTitleStyle}>{workoutTitle}</h1>
+        <h1 style={heroTitleStyle}>{displayWorkoutTitle}</h1>
         <p style={heroMetaStyle}>{workoutFocusLine}</p>
         <p style={heroSubStyle}>
           Log your real working sets, use AI to stay in the right rep ranges, and keep your session protected even if you refresh.
@@ -1870,7 +1898,7 @@ export default function WorkoutPage() {
           <h2 style={sectionTitle}>Add Exercise</h2>
         </div>
 
-        <div style={modeButtonRowStyle}>
+        <div style={modeButtonRowTwoStyle}>
           <button
             onClick={() => {
               setAddExerciseMode("library");
@@ -1879,7 +1907,7 @@ export default function WorkoutPage() {
             }}
             style={addExerciseMode === "library" ? modeButtonActiveStyle : modeButtonStyle}
           >
-            Choose from Lib
+            Choose from Library
           </button>
           <button
             onClick={() => {
@@ -1888,17 +1916,7 @@ export default function WorkoutPage() {
             }}
             style={addExerciseMode === "custom" ? modeButtonActiveStyle : modeButtonStyle}
           >
-            Enter Custom
-          </button>
-          <button
-            onClick={() => {
-              setAddExerciseMode("bodypart");
-              setLibraryChoice("");
-              setStatus("Pick a body part first.");
-            }}
-            style={addExerciseMode === "bodypart" ? modeButtonActiveStyle : modeButtonStyle}
-          >
-            Body Part
+            Custom Add
           </button>
         </div>
 
@@ -2041,9 +2059,7 @@ export default function WorkoutPage() {
                       <input
                         placeholder="Minutes"
                         value={entry.minutes}
-                        onChange={(e) =>
-                          updateCardioField(entry.id, "minutes", e.target.value)
-                        }
+                        onChange={(e) => updateCardioField(entry.id, "minutes", e.target.value)}
                         style={smallInputStyle}
                         inputMode="numeric"
                       />
@@ -2051,9 +2067,7 @@ export default function WorkoutPage() {
                       <input
                         placeholder="Seconds"
                         value={entry.seconds}
-                        onChange={(e) =>
-                          updateCardioField(entry.id, "seconds", e.target.value)
-                        }
+                        onChange={(e) => updateCardioField(entry.id, "seconds", e.target.value)}
                         style={smallInputStyle}
                         inputMode="numeric"
                       />
@@ -2106,7 +2120,7 @@ export default function WorkoutPage() {
           </div>
         ) : (
           <p style={{ ...helperTextStyle, marginTop: 12 }}>
-            Track treadmill work, jogging, swimming, biking, stairmaster, SkiErg, sled pushes, and more with quick inputs.
+            Track walking, treadmill work, jogging, swimming, biking, stairmaster, SkiErg, sled pushes, and more with quick inputs.
           </p>
         )}
       </section>
@@ -2263,6 +2277,23 @@ export default function WorkoutPage() {
             </div>
           </section>
         ))
+      )}
+
+      {confirmAction.open && (
+        <div style={confirmOverlayStyle}>
+          <div style={confirmCardStyle}>
+            <h3 style={confirmTitleStyle}>{confirmAction.title}</h3>
+            <p style={confirmMessageStyle}>{confirmAction.message}</p>
+            <div style={buttonRowStyle}>
+              <button onClick={closeConfirm} style={secondaryButtonStyle}>
+                No
+              </button>
+              <button onClick={runConfirmedAction} style={dangerButtonStyle}>
+                {confirmAction.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {status && <p style={statusStyle}>{status}</p>}
@@ -2549,9 +2580,9 @@ const buttonRowStyle: CSSProperties = {
   flexWrap: "wrap",
 };
 
-const modeButtonRowStyle: CSSProperties = {
+const modeButtonRowTwoStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
   gap: "10px",
 };
 
@@ -2812,4 +2843,39 @@ const aiHintTextStyle: CSSProperties = {
   color: "#9e9e9e",
   fontSize: "12px",
   lineHeight: 1.4,
+};
+
+const confirmOverlayStyle: CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(0,0,0,0.72)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "20px",
+  zIndex: 1000,
+};
+
+const confirmCardStyle: CSSProperties = {
+  width: "100%",
+  maxWidth: "420px",
+  background: "#121212",
+  border: "1px solid rgba(255,255,255,0.08)",
+  borderRadius: "20px",
+  padding: "20px",
+  boxShadow: "0 20px 50px rgba(0,0,0,0.45)",
+};
+
+const confirmTitleStyle: CSSProperties = {
+  margin: "0 0 10px",
+  color: "#fff",
+  fontSize: "20px",
+  fontWeight: 800,
+};
+
+const confirmMessageStyle: CSSProperties = {
+  margin: "0 0 18px",
+  color: "#bdbdbd",
+  fontSize: "14px",
+  lineHeight: 1.5,
 };

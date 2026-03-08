@@ -1,13 +1,7 @@
 "use client";
 
-import {
-  useEffect,
-  useMemo,
-  useState,
-  type CSSProperties,
-} from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
 import { generateWorkout } from "@/lib/generateWorkout";
 
 type Goal = "strength" | "hypertrophy" | "fat_loss" | "general";
@@ -65,11 +59,6 @@ type WorkoutPayload = {
   exercises: WorkoutExercise[];
 };
 
-type LastWorkoutSummary = {
-  workoutName: string;
-  totalSets: number;
-};
-
 const BODY_PART_OPTIONS: { label: string; value: BodyPart }[] = [
   { label: "Chest", value: "chest" },
   { label: "Back", value: "back" },
@@ -104,7 +93,9 @@ const EQUIPMENT_OPTIONS: { label: string; value: EquipmentAccess }[] = [
 ];
 
 function toTitleCase(value: string) {
-  return value.replaceAll("_", " ").replace(/\b\w/g, (char) => char.toUpperCase());
+  return value
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function normalizeLocalWorkout(workout: any): WorkoutPayload {
@@ -133,8 +124,10 @@ function normalizeLocalWorkout(workout: any): WorkoutPayload {
     : [];
 
   return {
-    workout_name: workout?.workout_name ?? workout?.workoutName ?? "Generated Workout",
-    workoutName: workout?.workout_name ?? workout?.workoutName ?? "Generated Workout",
+    workout_name:
+      workout?.workout_name ?? workout?.workoutName ?? "Generated Workout",
+    workoutName:
+      workout?.workout_name ?? workout?.workoutName ?? "Generated Workout",
     estimated_duration:
       workout?.estimated_duration ?? workout?.estimatedDurationMinutes ?? 45,
     estimatedDurationMinutes:
@@ -191,10 +184,9 @@ export default function WorkoutGenerator() {
     useState<EquipmentAccess>("full_gym");
 
   const [variationIndex, setVariationIndex] = useState(0);
-
-  const [generatedWorkout, setGeneratedWorkout] = useState<WorkoutPayload | null>(null);
-  const [lastWorkout, setLastWorkout] = useState<LastWorkoutSummary | null>(null);
-  const [lastWorkoutLoading, setLastWorkoutLoading] = useState(true);
+  const [generatedWorkout, setGeneratedWorkout] = useState<WorkoutPayload | null>(
+    null
+  );
   const [error, setError] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
 
@@ -207,61 +199,6 @@ export default function WorkoutGenerator() {
     () => getBodyPartCoachingLine(bodyPart),
     [bodyPart]
   );
-
-  useEffect(() => {
-    void loadLastWorkout();
-  }, []);
-
-  useEffect(() => {
-    setVariationIndex(0);
-    setGeneratedWorkout(null);
-  }, [bodyPart, goal, experienceLevel, equipmentAccess]);
-
-  async function loadLastWorkout() {
-    setLastWorkoutLoading(true);
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      setLastWorkoutLoading(false);
-      return;
-    }
-
-    const { data: workoutRow, error: workoutError } = await supabase
-      .from("workouts")
-      .select("id, workout_name")
-      .eq("user_id", user.id)
-      .eq("day_type", "workout")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (workoutError || !workoutRow?.id) {
-      setLastWorkoutLoading(false);
-      return;
-    }
-
-    const { data: setRows, error: setsError } = await supabase
-      .from("workout_sets")
-      .select("id")
-      .eq("workout_id", workoutRow.id);
-
-    let totalSets = 0;
-
-    if (!setsError && Array.isArray(setRows)) {
-      totalSets = setRows.length;
-    }
-
-    setLastWorkout({
-      workoutName: workoutRow.workout_name || "Previous Workout",
-      totalSets,
-    });
-
-    setLastWorkoutLoading(false);
-  }
 
   function handleGenerate() {
     try {
@@ -295,7 +232,10 @@ export default function WorkoutGenerator() {
     if (!generatedWorkout) return;
 
     localStorage.removeItem("respawn_active_workout_draft");
-    localStorage.setItem("respawn_generated_workout", JSON.stringify(generatedWorkout));
+    localStorage.setItem(
+      "respawn_generated_workout",
+      JSON.stringify(generatedWorkout)
+    );
     router.push("/Workout");
   }
 
@@ -305,8 +245,8 @@ export default function WorkoutGenerator() {
         <p style={eyebrowStyle}>RESPAWN TODAY</p>
         <h1 style={heroTitleStyle}>Tell Respawn what you want to train.</h1>
         <p style={heroSubStyle}>
-          You choose the goal, training focus, and equipment. Respawn chooses the
-          workout identity, exercise mix, and session structure.
+          You choose the goal, training focus, and equipment. Respawn chooses
+          the workout identity, exercise mix, and session structure.
         </p>
         <p style={heroStrongLineStyle}>
           Less guessing. Better sessions. More real progression.
@@ -315,45 +255,13 @@ export default function WorkoutGenerator() {
 
       <section style={cardStyle}>
         <div style={sectionHeaderStyle}>
-          <h2 style={sectionTitle}>Previous Workout</h2>
-        </div>
-
-        {lastWorkoutLoading ? (
-          <p style={mutedStyle}>Loading your latest session...</p>
-        ) : lastWorkout ? (
-          <div style={previousWorkoutCardStyle}>
-            <div style={previousWorkoutTopStyle}>
-              <div>
-                <p style={smallMutedLabelStyle}>Last session</p>
-                <h3 style={previousWorkoutTitleStyle}>{lastWorkout.workoutName}</h3>
-              </div>
-
-              <div style={previousWorkoutBadgeStyle}>Ready to beat it?</div>
-            </div>
-
-            <div style={previousWorkoutStatsRowStyle}>
-              <div style={previousWorkoutStatStyle}>
-                <span style={previousWorkoutStatLabelStyle}>Sets</span>
-                <span style={previousWorkoutStatValueStyle}>{lastWorkout.totalSets}</span>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <p style={mutedStyle}>
-            No previous workout logged yet. Generate your first session and start
-            building momentum.
-          </p>
-        )}
-      </section>
-
-      <section style={cardStyle}>
-        <div style={sectionHeaderStyle}>
           <h2 style={sectionTitle}>Coach-Led Workout Generator</h2>
         </div>
 
         <p style={mutedStyle}>
-          Pick the essentials. Respawn will choose the session identity, build the
-          exercise order, and vary the workout intelligently from session to session.
+          Pick the essentials. Respawn will choose the session identity, build
+          the exercise order, and vary the workout intelligently from session to
+          session.
         </p>
 
         <div style={coachExplainerStyle}>
@@ -396,7 +304,9 @@ export default function WorkoutGenerator() {
             <span style={labelStyle}>Experience Level</span>
             <select
               value={experienceLevel}
-              onChange={(e) => setExperienceLevel(e.target.value as ExperienceLevel)}
+              onChange={(e) =>
+                setExperienceLevel(e.target.value as ExperienceLevel)
+              }
               style={inputStyle}
             >
               {EXPERIENCE_OPTIONS.map((option) => (
@@ -411,7 +321,9 @@ export default function WorkoutGenerator() {
             <span style={labelStyle}>Equipment Access</span>
             <select
               value={equipmentAccess}
-              onChange={(e) => setEquipmentAccess(e.target.value as EquipmentAccess)}
+              onChange={(e) =>
+                setEquipmentAccess(e.target.value as EquipmentAccess)
+              }
               style={inputStyle}
             >
               {EQUIPMENT_OPTIONS.map((option) => (
@@ -445,7 +357,7 @@ export default function WorkoutGenerator() {
 
         {generatedWorkout && (
           <p style={variationHintStyle}>
-            Variation {variationIndex}. Same goal and setup, different valid session
+            Variation {variationIndex}. Same goal and setup, different session
             identity or exercise mix.
           </p>
         )}
@@ -483,10 +395,15 @@ export default function WorkoutGenerator() {
 
             <div style={previewListStyle}>
               {generatedWorkout.exercises.map((exercise, index) => (
-                <div key={`${exercise.exercise_name}-${index}`} style={previewItemStyle}>
+                <div
+                  key={`${exercise.exercise_name}-${index}`}
+                  style={previewItemStyle}
+                >
                   <div style={previewItemTopRowStyle}>
                     <div>
-                      <div style={previewExerciseStyle}>{exercise.exercise_name}</div>
+                      <div style={previewExerciseStyle}>
+                        {exercise.exercise_name}
+                      </div>
                       <div style={previewSubStyle}>
                         {exercise.sets.length} sets
                         {exercise.repRange
@@ -494,7 +411,9 @@ export default function WorkoutGenerator() {
                           : exercise.sets[0]?.reps
                           ? ` • ${exercise.sets[0]?.reps} reps`
                           : ""}
-                        {exercise.restSeconds ? ` • ${exercise.restSeconds}s rest` : ""}
+                        {exercise.restSeconds
+                          ? ` • ${exercise.restSeconds}s rest`
+                          : ""}
                       </div>
                     </div>
 
@@ -503,16 +422,22 @@ export default function WorkoutGenerator() {
                     </div>
                   </div>
 
-                  {(exercise.coachingNote || exercise.reason || exercise.notes) && (
+                  {(exercise.coachingNote ||
+                    exercise.reason ||
+                    exercise.notes) && (
                     <div style={exerciseMetaStyle}>
                       {exercise.coachingNote && (
-                        <div style={exerciseNoteStyle}>{exercise.coachingNote}</div>
+                        <div style={exerciseNoteStyle}>
+                          {exercise.coachingNote}
+                        </div>
                       )}
                       {exercise.reason && (
                         <div style={exerciseReasonStyle}>{exercise.reason}</div>
                       )}
                       {exercise.notes && (
-                        <div style={exerciseSpecialNoteStyle}>{exercise.notes}</div>
+                        <div style={exerciseSpecialNoteStyle}>
+                          {exercise.notes}
+                        </div>
                       )}
                     </div>
                   )}
@@ -534,26 +459,6 @@ export default function WorkoutGenerator() {
             )}
           </div>
         )}
-      </section>
-
-      <section style={cardStyle}>
-        <div style={sectionHeaderStyle}>
-          <h2 style={sectionTitle}>Tell ReSpawn what you want to train</h2>
-        </div>
-
-        <div style={explanationBlockStyle}>
-          <p style={explanationTextStyle}>
-            You choose the goal, body part, experience level, and equipment.
-          </p>
-          <p style={explanationTextStyle}>
-            InstInstead of forcing you to configure complicated settings, 
-            ReSpawn automatically chooses the right workout identity and structure for the session.
-          </p>
-          <p style={explanationTextStyle}>
-            That means your workouts should feel more intentional, more balanced, and
-            more like something a real coach would program.
-          </p>
-        </div>
       </section>
     </section>
   );
@@ -630,75 +535,6 @@ const sectionTitle: CSSProperties = {
 const mutedStyle: CSSProperties = {
   color: "#a5a5a5",
   margin: "6px 0 14px",
-};
-
-const smallMutedLabelStyle: CSSProperties = {
-  color: "#a5a5a5",
-  fontSize: "12px",
-  fontWeight: 700,
-  textTransform: "uppercase",
-  letterSpacing: "0.06em",
-  margin: "0 0 6px",
-};
-
-const previousWorkoutCardStyle: CSSProperties = {
-  background: "linear-gradient(135deg, rgba(255,255,255,0.035), rgba(255,26,26,0.04))",
-  border: "1px solid rgba(255,255,255,0.06)",
-  borderRadius: "18px",
-  padding: "16px",
-};
-
-const previousWorkoutTopStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "flex-start",
-  gap: "12px",
-  flexWrap: "wrap",
-};
-
-const previousWorkoutTitleStyle: CSSProperties = {
-  color: "#ffffff",
-  fontSize: "22px",
-  fontWeight: 800,
-  margin: 0,
-};
-
-const previousWorkoutBadgeStyle: CSSProperties = {
-  padding: "8px 10px",
-  borderRadius: "999px",
-  background: "rgba(255,77,77,0.14)",
-  border: "1px solid rgba(255,77,77,0.35)",
-  color: "#ff8b8b",
-  fontSize: "12px",
-  fontWeight: 800,
-};
-
-const previousWorkoutStatsRowStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr)",
-  gap: "10px",
-  marginTop: "16px",
-};
-
-const previousWorkoutStatStyle: CSSProperties = {
-  background: "rgba(255,255,255,0.03)",
-  border: "1px solid rgba(255,255,255,0.05)",
-  borderRadius: "14px",
-  padding: "12px",
-  display: "flex",
-  flexDirection: "column",
-  gap: "6px",
-};
-
-const previousWorkoutStatLabelStyle: CSSProperties = {
-  color: "#a8a8a8",
-  fontSize: "12px",
-};
-
-const previousWorkoutStatValueStyle: CSSProperties = {
-  color: "#ffffff",
-  fontSize: "18px",
-  fontWeight: 800,
 };
 
 const coachExplainerStyle: CSSProperties = {
@@ -941,18 +777,6 @@ const tipItemStyle: CSSProperties = {
   color: "#c9c9c9",
   fontSize: "13px",
   lineHeight: 1.45,
-};
-
-const explanationBlockStyle: CSSProperties = {
-  display: "grid",
-  gap: "10px",
-};
-
-const explanationTextStyle: CSSProperties = {
-  color: "#d5d5d5",
-  fontSize: "14px",
-  lineHeight: 1.6,
-  margin: 0,
 };
 
 const errorStyle: CSSProperties = {

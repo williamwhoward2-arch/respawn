@@ -99,7 +99,7 @@ export default function TodayPage() {
           <p style={eyebrowStyle}>RESPAWN BUILD</p>
           <h1 style={heroTitleStyle}>Loading build tools...</h1>
           <p style={heroSubStyle}>
-            Preparing your workout options and session flow.
+            Preparing your workout generator and session flow.
           </p>
         </section>
       </main>
@@ -109,32 +109,30 @@ export default function TodayPage() {
   return (
     <main style={pageStyle}>
       <section style={heroCardStyle}>
-        <p style={eyebrowStyle}>RESPAWN BUILD</p>
-        <h1 style={heroTitleStyle}>Smarter Workouts. Real Progress.</h1>
+        <p style={eyebrowStyle}></p>
+        <h1 style={heroTitleStyle}></h1>
         <p style={heroSubStyle}>
-          ReSpawn helps you build better workouts using AI and your training
-          history.
         </p>
       </section>
 
       <section style={cardStyle}>
         <div style={sectionHeaderStyle}>
-          <h2 style={sectionTitle}>Build a Workout</h2>
+          <h2 style={sectionTitle}>AI Workout Builder</h2>
         </div>
 
         <p style={sectionSubStyle}>
-          Generate a smart workout built for real progress.
+          Generate a smart workout and send it straight to your Session Page.
         </p>
 
         <p style={bodyCopyStyle}>
-          Use ReSpawn AI to generate a personalized workout Once generated, 
-          the workout is sent directly to your Session Page, where you can.
+          Once generated, your workout is ready to use right away. You can
+          adjust the session however you want before or during training.
         </p>
 
         <div style={featureListStyle}>
           <div style={featureItemStyle}>
             <div style={featureBulletStyle} />
-            <span>Start training right away</span>
+            <span>Start training immediately</span>
           </div>
           <div style={featureItemStyle}>
             <div style={featureBulletStyle} />
@@ -146,11 +144,11 @@ export default function TodayPage() {
           </div>
           <div style={featureItemStyle}>
             <div style={featureBulletStyle} />
-            <span>Customize the session to fit your needs</span>
+            <span>Customize the session to fit your day</span>
           </div>
         </div>
 
-        <div style={{ marginTop: 18 }}>
+        <div style={{ marginTop: 20 }}>
           <WorkoutGenerator />
         </div>
       </section>
@@ -161,18 +159,19 @@ export default function TodayPage() {
         </div>
 
         <p style={sectionSubStyle}>
-          Log a rest day when recovery is the right call.
+          Log a rest day when recovery is the smarter move.
         </p>
 
         <p style={bodyCopyStyle}>
-          Rest days still matter. Logging them keeps your training history
-          cleaner and makes your progress data more honest over time.
+          Recovery still counts. Logging rest days keeps your history cleaner
+          and helps ReSpawn better understand your real training rhythm over
+          time.
         </p>
 
         <textarea
           value={restDayNote}
           onChange={(e) => setRestDayNote(e.target.value)}
-          placeholder="Optional note: sore, travel, active recovery, poor sleep, low energy, etc."
+          placeholder="Optional note: sore, travel, active recovery, low energy, poor sleep, etc."
           style={textAreaStyle}
           rows={4}
         />
@@ -194,11 +193,11 @@ export default function TodayPage() {
         <h3 style={supportTitleStyle}>Want full control?</h3>
         <p style={supportTextStyle}>
           You can also build your own custom workout from scratch and log
-          everything as you go.
+          everything as you train.
         </p>
         <p style={supportTextStyle}>
-          Every workout — AI-built or fully custom — feeds your progress
-          tracking, workout reviews, strength insights, and long-term
+          Every workout — AI-generated or fully custom — feeds your progress
+          tracking, strength insights, workout reviews, and long-term
           performance data.
         </p>
       </section>
