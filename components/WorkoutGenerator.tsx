@@ -29,34 +29,6 @@ type EquipmentAccess =
   | "bodyweight_only"
   | "minimal_home_gym";
 
-type WorkoutStyle =
-  | "balanced"
-  | "bodybuilding"
-  | "high_volume"
-  | "old_school_mass"
-  | "intensity"
-  | "pump"
-  | "strength_size";
-
-type VolumeTier = "moderate" | "high" | "brutal";
-
-type MuscleEmphasis =
-  | "upper_chest"
-  | "mid_chest"
-  | "lower_chest"
-  | "lat_width"
-  | "mid_back_thickness"
-  | "upper_back_detail"
-  | "quad_bias"
-  | "glute_bias"
-  | "hamstring_bias"
-  | "front_delt_bias"
-  | "side_delt_bias"
-  | "rear_delt_bias"
-  | "tricep_long_head"
-  | "bicep_peak"
-  | "core_stability";
-
 type WorkoutSet = {
   weight: string;
   reps: string;
@@ -90,15 +62,11 @@ type WorkoutPayload = {
   progressionAdvice?: string[];
   totalWorkingSets?: number;
   workoutStyle?: string;
-  emphasis?: MuscleEmphasis | "";
   exercises: WorkoutExercise[];
 };
 
 type LastWorkoutSummary = {
   workoutName: string;
-  durationSeconds: number;
-  createdAt: string;
-  totalVolume: number;
   totalSets: number;
 };
 
@@ -135,66 +103,8 @@ const EQUIPMENT_OPTIONS: { label: string; value: EquipmentAccess }[] = [
   { label: "Minimal home gym", value: "minimal_home_gym" },
 ];
 
-const STYLE_OPTIONS: { label: string; value: WorkoutStyle }[] = [
-  { label: "Balanced Hypertrophy", value: "balanced" },
-  { label: "Bodybuilding", value: "bodybuilding" },
-  { label: "High Volume Mass", value: "high_volume" },
-  { label: "Old School Mass", value: "old_school_mass" },
-  { label: "Intensity Focus", value: "intensity" },
-  { label: "Pump Focus", value: "pump" },
-  { label: "Strength + Size", value: "strength_size" },
-];
-
-const VOLUME_OPTIONS: { label: string; value: VolumeTier }[] = [
-  { label: "Standard", value: "moderate" },
-  { label: "High", value: "high" },
-  { label: "Brutal", value: "brutal" },
-];
-
-const DURATION_OPTIONS = [30, 45, 60, 75, 90];
-
-const EMPHASIS_OPTIONS: Partial<
-  Record<BodyPart, { label: string; value: MuscleEmphasis }[]>
-> = {
-  chest: [
-    { label: "Upper Chest", value: "upper_chest" },
-    { label: "Mid Chest", value: "mid_chest" },
-    { label: "Lower Chest", value: "lower_chest" },
-  ],
-  back: [
-    { label: "Lat Width", value: "lat_width" },
-    { label: "Mid-Back Thickness", value: "mid_back_thickness" },
-    { label: "Upper Back Detail", value: "upper_back_detail" },
-  ],
-  legs: [
-    { label: "Quad Bias", value: "quad_bias" },
-    { label: "Glute Bias", value: "glute_bias" },
-    { label: "Hamstring Bias", value: "hamstring_bias" },
-  ],
-  shoulders: [
-    { label: "Front Delt Bias", value: "front_delt_bias" },
-    { label: "Side Delt Bias", value: "side_delt_bias" },
-    { label: "Rear Delt Bias", value: "rear_delt_bias" },
-  ],
-  arms: [
-    { label: "Bicep Peak", value: "bicep_peak" },
-    { label: "Tricep Long Head", value: "tricep_long_head" },
-  ],
-};
-
 function toTitleCase(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function formatDurationFromSeconds(totalSeconds: number) {
-  const totalMinutes = Math.max(0, Math.round(totalSeconds / 60));
-  if (totalMinutes < 60) return `${totalMinutes} min`;
-
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-
-  if (minutes === 0) return `${hours} hr`;
-  return `${hours} hr ${minutes} min`;
 }
 
 function normalizeLocalWorkout(workout: any): WorkoutPayload {
@@ -234,24 +144,51 @@ function normalizeLocalWorkout(workout: any): WorkoutPayload {
     progressionAdvice: workout?.progressionAdvice ?? [],
     totalWorkingSets: workout?.totalWorkingSets ?? 0,
     workoutStyle: workout?.workoutStyle ?? "",
-    emphasis: workout?.emphasis ?? "",
     exercises: normalizedExercises,
   };
+}
+
+function getBodyPartCoachingLine(bodyPart: BodyPart) {
+  if (bodyPart === "legs") {
+    return "Respawn will choose the right lower-body session identity for today — quad dominant, glute + ham dominant, balanced lower, or unilateral lower.";
+  }
+
+  if (bodyPart === "back") {
+    return "Respawn will choose whether today should feel more like a width day, thickness day, or balanced pull session.";
+  }
+
+  if (bodyPart === "chest") {
+    return "Respawn will decide whether today should be a press-led session, upper-chest biased session, or a cleaner hypertrophy pump session.";
+  }
+
+  if (bodyPart === "shoulders") {
+    return "Respawn will shape the workout around delt growth, shoulder pressing, and arm overlap when it makes sense.";
+  }
+
+  if (bodyPart === "arms") {
+    return "Respawn will build an arm-focused session with enough variety to feel productive, not repetitive.";
+  }
+
+  if (bodyPart === "push") {
+    return "Respawn will combine chest, shoulders, and triceps into a smarter push session built around one strong anchor.";
+  }
+
+  if (bodyPart === "pull") {
+    return "Respawn will combine rows, pulldowns, rear delts, and biceps into a more complete pull workout.";
+  }
+
+  return "Respawn will build a full-body session with a strong training identity instead of random exercise filler.";
 }
 
 export default function WorkoutGenerator() {
   const router = useRouter();
 
-  const [bodyPart, setBodyPart] = useState<BodyPart>("chest");
+  const [bodyPart, setBodyPart] = useState<BodyPart>("legs");
   const [goal, setGoal] = useState<Goal>("hypertrophy");
-  const [duration, setDuration] = useState<number>(60);
   const [experienceLevel, setExperienceLevel] =
     useState<ExperienceLevel>("intermediate");
   const [equipmentAccess, setEquipmentAccess] =
     useState<EquipmentAccess>("full_gym");
-  const [style, setStyle] = useState<WorkoutStyle>("bodybuilding");
-  const [volumeTier, setVolumeTier] = useState<VolumeTier>("high");
-  const [emphasis, setEmphasis] = useState<MuscleEmphasis | "">("");
 
   const [variationIndex, setVariationIndex] = useState(0);
 
@@ -261,8 +198,15 @@ export default function WorkoutGenerator() {
   const [error, setError] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
 
-  const readableEquipment = useMemo(() => toTitleCase(equipmentAccess), [equipmentAccess]);
-  const emphasisOptions = EMPHASIS_OPTIONS[bodyPart] ?? [];
+  const readableEquipment = useMemo(
+    () => toTitleCase(equipmentAccess),
+    [equipmentAccess]
+  );
+
+  const bodyPartCoachingLine = useMemo(
+    () => getBodyPartCoachingLine(bodyPart),
+    [bodyPart]
+  );
 
   useEffect(() => {
     void loadLastWorkout();
@@ -271,7 +215,7 @@ export default function WorkoutGenerator() {
   useEffect(() => {
     setVariationIndex(0);
     setGeneratedWorkout(null);
-  }, [bodyPart, goal, duration, experienceLevel, equipmentAccess, style, volumeTier, emphasis]);
+  }, [bodyPart, goal, experienceLevel, equipmentAccess]);
 
   async function loadLastWorkout() {
     setLastWorkoutLoading(true);
@@ -288,7 +232,7 @@ export default function WorkoutGenerator() {
 
     const { data: workoutRow, error: workoutError } = await supabase
       .from("workouts")
-      .select("id, workout_name, duration_seconds, created_at")
+      .select("id, workout_name")
       .eq("user_id", user.id)
       .eq("day_type", "workout")
       .order("created_at", { ascending: false })
@@ -302,27 +246,17 @@ export default function WorkoutGenerator() {
 
     const { data: setRows, error: setsError } = await supabase
       .from("workout_sets")
-      .select("weight, reps")
+      .select("id")
       .eq("workout_id", workoutRow.id);
 
-    let totalVolume = 0;
     let totalSets = 0;
 
     if (!setsError && Array.isArray(setRows)) {
       totalSets = setRows.length;
-      totalVolume = setRows.reduce((sum, row) => {
-        const weight = Number(row.weight ?? 0);
-        const reps = Number(row.reps ?? 0);
-        const volume = Number.isFinite(weight) && Number.isFinite(reps) ? weight * reps : 0;
-        return sum + volume;
-      }, 0);
     }
 
     setLastWorkout({
       workoutName: workoutRow.workout_name || "Previous Workout",
-      durationSeconds: workoutRow.duration_seconds || 0,
-      createdAt: workoutRow.created_at || "",
-      totalVolume,
       totalSets,
     });
 
@@ -341,12 +275,9 @@ export default function WorkoutGenerator() {
       const workout = generateWorkout({
         bodyPart,
         goal,
-        duration,
+        duration: 60,
         experienceLevel,
         equipmentAccess,
-        style,
-        volumeTier,
-        emphasis,
         variationIndex: nextVariation,
       });
 
@@ -372,13 +303,13 @@ export default function WorkoutGenerator() {
     <section style={pageWrapStyle}>
       <section style={heroCardStyle}>
         <p style={eyebrowStyle}>RESPAWN TODAY</p>
-        <h1 style={heroTitleStyle}>Your body decides the path.</h1>
+        <h1 style={heroTitleStyle}>Tell Respawn what you want to train.</h1>
         <p style={heroSubStyle}>
-          Train hard and generate a session built for progression, or take the day to
-          recover so tomorrow’s performance stays elite.
+          You choose the goal, training focus, and equipment. Respawn chooses the
+          workout identity, exercise mix, and session structure.
         </p>
         <p style={heroStrongLineStyle}>
-          Training builds the strength. Recovery unlocks it.
+          Less guessing. Better sessions. More real progression.
         </p>
       </section>
 
@@ -402,18 +333,6 @@ export default function WorkoutGenerator() {
 
             <div style={previousWorkoutStatsRowStyle}>
               <div style={previousWorkoutStatStyle}>
-                <span style={previousWorkoutStatLabelStyle}>Volume</span>
-                <span style={previousWorkoutStatValueStyle}>
-                  {lastWorkout.totalVolume.toLocaleString()}
-                </span>
-              </div>
-              <div style={previousWorkoutStatStyle}>
-                <span style={previousWorkoutStatLabelStyle}>Duration</span>
-                <span style={previousWorkoutStatValueStyle}>
-                  {formatDurationFromSeconds(lastWorkout.durationSeconds)}
-                </span>
-              </div>
-              <div style={previousWorkoutStatStyle}>
                 <span style={previousWorkoutStatLabelStyle}>Sets</span>
                 <span style={previousWorkoutStatValueStyle}>{lastWorkout.totalSets}</span>
               </div>
@@ -421,32 +340,33 @@ export default function WorkoutGenerator() {
           </div>
         ) : (
           <p style={mutedStyle}>
-            No previous workout logged yet. Generate your first session and start building
-            momentum.
+            No previous workout logged yet. Generate your first session and start
+            building momentum.
           </p>
         )}
       </section>
 
       <section style={cardStyle}>
         <div style={sectionHeaderStyle}>
-          <h2 style={sectionTitle}>Workout Generator</h2>
+          <h2 style={sectionTitle}>Coach-Led Workout Generator</h2>
         </div>
 
         <p style={mutedStyle}>
-          Choose your focus, training style, and setup. Respawn will build a smarter
-          session designed for progression.
+          Pick the essentials. Respawn will choose the session identity, build the
+          exercise order, and vary the workout intelligently from session to session.
         </p>
+
+        <div style={coachExplainerStyle}>
+          <div style={coachExplainerLabelStyle}>Today’s setup</div>
+          <div style={coachExplainerTextStyle}>{bodyPartCoachingLine}</div>
+        </div>
 
         <div style={formGridStyle}>
           <label style={fieldStyle}>
             <span style={labelStyle}>Body Part</span>
             <select
               value={bodyPart}
-              onChange={(e) => {
-                const nextBodyPart = e.target.value as BodyPart;
-                setBodyPart(nextBodyPart);
-                setEmphasis("");
-              }}
+              onChange={(e) => setBodyPart(e.target.value as BodyPart)}
               style={inputStyle}
             >
               {BODY_PART_OPTIONS.map((option) => (
@@ -467,51 +387,6 @@ export default function WorkoutGenerator() {
               {GOAL_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Workout Style</span>
-            <select
-              value={style}
-              onChange={(e) => setStyle(e.target.value as WorkoutStyle)}
-              style={inputStyle}
-            >
-              {STYLE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Volume</span>
-            <select
-              value={volumeTier}
-              onChange={(e) => setVolumeTier(e.target.value as VolumeTier)}
-              style={inputStyle}
-            >
-              {VOLUME_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Duration</span>
-            <select
-              value={duration}
-              onChange={(e) => setDuration(Number(e.target.value))}
-              style={inputStyle}
-            >
-              {DURATION_OPTIONS.map((minutes) => (
-                <option key={minutes} value={minutes}>
-                  {minutes} min
                 </option>
               ))}
             </select>
@@ -546,23 +421,6 @@ export default function WorkoutGenerator() {
               ))}
             </select>
           </label>
-
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Focus / Emphasis</span>
-            <select
-              value={emphasis}
-              onChange={(e) => setEmphasis(e.target.value as MuscleEmphasis | "")}
-              style={inputStyle}
-              disabled={emphasisOptions.length === 0}
-            >
-              <option value="">No special focus</option>
-              {emphasisOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
         </div>
 
         <div style={actionRowStyle}>
@@ -587,7 +445,8 @@ export default function WorkoutGenerator() {
 
         {generatedWorkout && (
           <p style={variationHintStyle}>
-            Variation {variationIndex}. Same inputs, different valid exercise mix.
+            Variation {variationIndex}. Same goal and setup, different valid session
+            identity or exercise mix.
           </p>
         )}
 
@@ -599,14 +458,9 @@ export default function WorkoutGenerator() {
               <div>
                 <h3 style={previewTitleStyle}>{generatedWorkout.workout_name}</h3>
                 <p style={mutedStyle}>
-                  {generatedWorkout.estimated_duration} min
                   {generatedWorkout.totalWorkingSets
-                    ? ` • ${generatedWorkout.totalWorkingSets} working sets`
+                    ? `${generatedWorkout.totalWorkingSets} working sets • `
                     : ""}
-                  {generatedWorkout.workoutStyle
-                    ? ` • ${generatedWorkout.workoutStyle}`
-                    : ""}
-                  {" • "}
                   {toTitleCase(experienceLevel)}
                   {" • "}
                   {readableEquipment}
@@ -689,18 +543,17 @@ export default function WorkoutGenerator() {
 
         <div style={explanationBlockStyle}>
           <p style={explanationTextStyle}>
-            Respawn generates workouts using your goal, training style, experience level,
-            time available, and equipment access.
+            Respawn now chooses the workout identity for you based on your goal,
+            training focus, experience level, and equipment access.
           </p>
           <p style={explanationTextStyle}>
-            Each session balances compound lifts and accessory work, sets rep ranges for
-            progression, and recommends rest times so you can train effectively and improve
-            week to week.
+            Instead of forcing you to configure extra settings, Respawn handles the
+            workout structure internally and builds a session that makes more sense for
+            the day.
           </p>
           <p style={explanationTextStyle}>
-            Respawn also looks at your previous workouts to understand what you trained last
-            and helps structure the next session to keep your training balanced and
-            progressing.
+            That means your workouts should feel more intentional, more balanced, and
+            more like something a real coach would program.
           </p>
         </div>
       </section>
@@ -824,7 +677,7 @@ const previousWorkoutBadgeStyle: CSSProperties = {
 
 const previousWorkoutStatsRowStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gridTemplateColumns: "minmax(0, 1fr)",
   gap: "10px",
   marginTop: "16px",
 };
@@ -848,6 +701,29 @@ const previousWorkoutStatValueStyle: CSSProperties = {
   color: "#ffffff",
   fontSize: "18px",
   fontWeight: 800,
+};
+
+const coachExplainerStyle: CSSProperties = {
+  marginBottom: "16px",
+  background: "rgba(255,255,255,0.035)",
+  border: "1px solid rgba(255,255,255,0.06)",
+  borderRadius: "14px",
+  padding: "14px",
+};
+
+const coachExplainerLabelStyle: CSSProperties = {
+  color: "#ff6b6b",
+  fontSize: "12px",
+  fontWeight: 900,
+  textTransform: "uppercase",
+  letterSpacing: "0.06em",
+  marginBottom: "6px",
+};
+
+const coachExplainerTextStyle: CSSProperties = {
+  color: "#e5e5e5",
+  fontSize: "14px",
+  lineHeight: 1.5,
 };
 
 const formGridStyle: CSSProperties = {

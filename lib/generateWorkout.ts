@@ -2,6 +2,7 @@ import {
   exerciseLibrary,
   type Goal,
   type BodyPart,
+  type GeneratorFocus,
   type ExperienceLevel,
   type EquipmentAccess,
   type Exercise,
@@ -10,7 +11,8 @@ import {
   type WorkoutStyle,
   type VolumeTier,
   type GeneratedWorkoutStyle,
-  type EquipmentType,
+  type EquipmentFit,
+  type LiftRole,
 } from "./workoutGeneratorData";
 
 export type GeneratedSet = {
@@ -50,7 +52,7 @@ export type GeneratedWorkout = {
 type GenerateWorkoutInput = {
   bodyPart: BodyPart;
   goal: Goal;
-  duration: number;
+  duration?: number;
   experienceLevel: ExperienceLevel;
   equipmentAccess: EquipmentAccess;
   style?: WorkoutStyle;
@@ -59,50 +61,64 @@ type GenerateWorkoutInput = {
   variationIndex?: number;
 };
 
-type TemplateSlot =
-  | "primary_press"
-  | "secondary_press"
-  | "upper_bias_press"
-  | "stable_press"
-  | "stretch_chest_iso"
-  | "squeeze_chest_iso"
-  | "back_row_primary"
-  | "back_row_secondary"
-  | "back_vertical_pull"
-  | "lat_isolation"
-  | "legs_main_knee"
-  | "legs_main_hinge"
-  | "legs_secondary_knee"
-  | "legs_unilateral"
-  | "legs_quad_iso"
-  | "legs_ham_iso"
-  | "legs_glute_iso"
+type WorkoutIdentity =
+  | "Chest Strength Session"
+  | "Upper Chest Focus"
+  | "Chest Volume Session"
+  | "Back Density Session"
+  | "Lat Focus Pull Day"
+  | "Balanced Pull Session"
+  | "Quad Focus Lower"
+  | "Glute + Hamstring Session"
+  | "Balanced Lower Session"
+  | "Unilateral Lower Session"
+  | "Shoulder Focus Session"
+  | "Shoulders + Arms Session"
+  | "Arm Focus Session"
+  | "Push Training Session"
+  | "Pull Training Session"
+  | "Full Body Performance"
+  | "Full Body Training Session";
+
+type SessionSlot =
+  | "anchor"
+  | "primary"
+  | "secondary"
+  | "secondary_alt"
+  | "unilateral"
+  | "lat_iso"
+  | "quad_iso"
+  | "ham_iso"
+  | "glute_iso"
+  | "side_delt_iso"
+  | "rear_delt_iso"
+  | "biceps_iso"
+  | "triceps_iso"
   | "calves"
-  | "shoulder_press"
-  | "side_delt"
-  | "rear_delt"
-  | "biceps_primary"
-  | "biceps_secondary"
-  | "triceps_primary"
-  | "triceps_secondary"
   | "core"
   | "finisher";
 
-type SlotDefinition = {
-  slot: TemplateSlot;
+type SessionPlanSlot = {
+  slot: SessionSlot;
   sets: number;
   optional?: boolean;
 };
 
-type LegFocus = "balanced" | "quad_bias" | "glute_ham_bias";
+type SessionPlan = {
+  identity: WorkoutIdentity;
+  focuses: GeneratorFocus[];
+  slots: SessionPlanSlot[];
+  unilateralTarget: 0 | 1 | 2;
+  summary: string;
+};
 
 const STYLE_LABELS: Record<WorkoutStyle, GeneratedWorkoutStyle> = {
-  balanced: "Balanced Hypertrophy",
-  bodybuilding: "Bodybuilding Builder",
-  high_volume: "High Volume Mass",
-  old_school_mass: "Old School Mass",
-  intensity: "Intensity Focus",
-  pump: "Pump Session",
+  balanced: "Balanced Training",
+  bodybuilding: "Muscle Focus",
+  high_volume: "High Volume",
+  old_school_mass: "Heavy Volume",
+  intensity: "High Intensity",
+  pump: "Short Rest Burn",
   strength_size: "Strength + Size",
 };
 
@@ -112,40 +128,8 @@ const EXPERIENCE_RANK: Record<ExperienceLevel, number> = {
   advanced: 3,
 };
 
-const EQUIPMENT_COMPATIBILITY: Record<EquipmentAccess, EquipmentType[]> = {
-  full_gym: [
-    "barbell",
-    "dumbbell",
-    "kettlebell",
-    "cable",
-    "machine",
-    "bodyweight",
-    "smith",
-    "plate_loaded",
-  ],
-  dumbbells_only: ["dumbbell", "kettlebell", "bodyweight"],
-  barbell_rack: ["barbell", "dumbbell", "bodyweight"],
-  machines_only: ["machine", "cable", "plate_loaded", "smith", "bodyweight"],
-  bodyweight_only: ["bodyweight"],
-  minimal_home_gym: ["dumbbell", "barbell", "kettlebell", "bodyweight"],
-};
-
 function toTitleCase(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function shuffleArray<T>(array: T[]): T[] {
-  const copy = [...array];
-  for (let i = copy.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-}
-
-function sampleOne<T>(items: T[]): T | null {
-  if (!items.length) return null;
-  return items[Math.floor(Math.random() * items.length)];
 }
 
 function rotateArray<T>(items: T[], offset: number): T[] {
@@ -161,6 +145,45 @@ function buildSets(setCount: number, reps: string): GeneratedSet[] {
     reps,
     completed: false,
   }));
+}
+
+function uniqueById<T extends { id: string }>(items: T[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
+function getEquipmentFitScore(
+  exercise: Exercise,
+  equipmentAccess: EquipmentAccess
+): number {
+  const fit = exercise.equipmentFit?.[equipmentAccess] as EquipmentFit | undefined;
+
+  if (fit === "best") return 6;
+  if (fit === "good") return 3;
+  if (fit === "backup") return 1;
+
+  if (exercise.equipmentAccess.includes(equipmentAccess)) return 2;
+  return 0;
+}
+
+function isExerciseValidForUser(
+  exercise: Exercise,
+  equipmentAccess: EquipmentAccess,
+  experienceLevel: ExperienceLevel
+) {
+  const equipmentOk =
+    exercise.equipmentAccess.includes(equipmentAccess) ||
+    getEquipmentFitScore(exercise, equipmentAccess) > 0;
+
+  const levelOk = exercise.levels.some(
+    (level) => EXPERIENCE_RANK[level] <= EXPERIENCE_RANK[experienceLevel]
+  );
+
+  return equipmentOk && levelOk;
 }
 
 function getDisplayBodyPart(exercise: Exercise, requestedBodyPart: BodyPart): string {
@@ -202,570 +225,668 @@ function getIntensityLabel(
   goal: Goal,
   volumeTier: VolumeTier
 ): "easy" | "moderate" | "hard" {
-  if (goal === "strength" && duration >= 45) return "hard";
   if (volumeTier === "brutal") return "hard";
+  if (goal === "strength" && duration >= 45) return "hard";
   if (duration >= 60 || volumeTier === "high") return "hard";
   if (duration <= 30 && volumeTier === "moderate") return "easy";
   return "moderate";
 }
 
-function getWorkoutTitle(
-  bodyPart: BodyPart,
-  style: WorkoutStyle,
-  volumeTier: VolumeTier,
-  emphasis?: MuscleEmphasis | ""
-) {
-  const bodyPartLabel = toTitleCase(bodyPart);
-  const styleLabel = STYLE_LABELS[style];
-  const volumeLabel =
-    volumeTier === "moderate"
-      ? "Standard"
-      : volumeTier === "high"
-      ? "High Volume"
-      : "Brutal Volume";
-
-  if (emphasis) {
-    return `${bodyPartLabel} • ${styleLabel} • ${toTitleCase(emphasis)} Focus • ${volumeLabel}`;
+function pickRepRange(goal: Goal, style: WorkoutStyle, exercise: Exercise) {
+  if (goal === "strength") {
+    if (exercise.category === "main" || exercise.liftRole === "anchor") return "4-6";
+    if (exercise.category === "accessory") return "6-8";
+    return "8-12";
   }
 
-  return `${bodyPartLabel} • ${styleLabel} • ${volumeLabel}`;
+  if (style === "pump") {
+    if (exercise.category === "main") return "8-10";
+    if (exercise.category === "accessory") return "10-15";
+    return "12-20";
+  }
+
+  if (style === "high_volume") {
+    if (exercise.category === "main") return "6-10";
+    if (exercise.category === "accessory") return "8-12";
+    return "12-20";
+  }
+
+  if (style === "bodybuilding") {
+    if (exercise.category === "main") return "6-8";
+    if (exercise.category === "accessory") return "8-12";
+    return "10-15";
+  }
+
+  if (style === "strength_size") {
+    if (exercise.category === "main") return "5-8";
+    if (exercise.category === "accessory") return "8-10";
+    return "10-15";
+  }
+
+  if (goal === "fat_loss") {
+    if (exercise.category === "main") return "8-10";
+    if (exercise.category === "accessory") return "10-12";
+    return "12-15";
+  }
+
+  if (goal === "general") {
+    if (exercise.category === "main") return "6-10";
+    if (exercise.category === "accessory") return "8-12";
+    return "10-15";
+  }
+
+  if (exercise.category === "main") return "6-8";
+  if (exercise.category === "accessory") return "8-12";
+  return "10-15";
 }
 
-function isExerciseValidForUser(
-  exercise: Exercise,
-  equipmentAccess: EquipmentAccess,
-  experienceLevel: ExperienceLevel
-) {
-  const allowedEquipment = EQUIPMENT_COMPATIBILITY[equipmentAccess];
-  const equipmentOk = exercise.equipmentTypes.some((type) =>
-    allowedEquipment.includes(type)
-  );
+function getRestSeconds(goal: Goal, style: WorkoutStyle, exercise: Exercise) {
+  if (goal === "strength") {
+    if (exercise.category === "main" || exercise.liftRole === "anchor") {
+      if (
+        ["squat", "hinge", "horizontal_press", "vertical_press"].includes(
+          exercise.movementPattern
+        )
+      ) {
+        return 240;
+      }
+      return 180;
+    }
+    if (exercise.category === "accessory") return 105;
+    return 75;
+  }
 
-  const levelOk = exercise.levels.some(
-    (level) => EXPERIENCE_RANK[level] <= EXPERIENCE_RANK[experienceLevel]
-  );
+  if (style === "strength_size") {
+    if (exercise.category === "main") return 150;
+    if (exercise.category === "accessory") return 90;
+    return 60;
+  }
 
-  return equipmentOk && levelOk;
+  if (style === "old_school_mass") {
+    if (exercise.category === "main") return 135;
+    if (exercise.category === "accessory") return 90;
+    return 60;
+  }
+
+  if (style === "bodybuilding") {
+    if (exercise.category === "main") return 120;
+    if (exercise.category === "accessory") return 75;
+    return 60;
+  }
+
+  if (style === "high_volume") {
+    if (exercise.category === "main") return 105;
+    if (exercise.category === "accessory") return 75;
+    return 45;
+  }
+
+  if (style === "pump") {
+    if (exercise.category === "main") return 75;
+    if (exercise.category === "accessory") return 60;
+    return 45;
+  }
+
+  if (style === "intensity") {
+    if (exercise.category === "main") return 120;
+    if (exercise.category === "accessory") return 75;
+    return 60;
+  }
+
+  if (exercise.category === "main") return 105;
+  if (exercise.category === "accessory") return 75;
+  return 60;
 }
 
-function getPoolForBodyPart(bodyPart: BodyPart) {
-  return exerciseLibrary.filter((exercise) => {
-    if (bodyPart === "push") {
-      return ["chest", "shoulders", "front_delts", "side_delts", "triceps"].includes(
-        exercise.primaryMuscle
-      );
-    }
+function inferLiftRole(exercise: Exercise): LiftRole {
+  if (exercise.liftRole) return exercise.liftRole;
+  if (exercise.isPrimaryCompound && exercise.category === "main") return "anchor";
+  if (exercise.category === "main") return "primary";
+  if (exercise.category === "accessory") return "accessory";
+  return "isolation";
+}
 
-    if (bodyPart === "pull") {
-      return [
-        "back",
-        "lats",
-        "upper_back",
-        "lower_back",
-        "rear_delts",
-        "biceps",
-        "forearms",
-      ].includes(exercise.primaryMuscle);
-    }
+function matchesAnyFocus(exercise: Exercise, focuses: GeneratorFocus[]) {
+  if (exercise.sessionFocuses?.length) {
+    return focuses.some((focus) => exercise.sessionFocuses?.includes(focus));
+  }
 
-    if (bodyPart === "full_body") return true;
-
-    if (bodyPart === "arms") {
-      return ["biceps", "triceps", "forearms"].includes(exercise.primaryMuscle);
-    }
-
-    if (bodyPart === "shoulders") {
-      return ["shoulders", "front_delts", "side_delts", "rear_delts"].includes(
-        exercise.primaryMuscle
-      );
-    }
-
-    if (bodyPart === "legs") {
-      return ["quads", "glutes", "hamstrings", "calves"].includes(exercise.primaryMuscle);
-    }
-
-    if (bodyPart === "chest") {
+  return focuses.some((focus) => {
+    if (focus === "chest" || focus === "chest_shoulders" || focus === "chest_triceps") {
       return ["chest", "front_delts", "triceps"].includes(exercise.primaryMuscle);
     }
-
-    if (bodyPart === "back") {
+    if (focus === "back" || focus === "back_biceps" || focus === "back_rear_delts") {
       return ["back", "lats", "upper_back", "lower_back", "rear_delts", "biceps"].includes(
         exercise.primaryMuscle
       );
     }
-
+    if (focus === "legs" || focus === "lower" || focus === "quads_glutes") {
+      return ["quads", "glutes", "hamstrings", "calves"].includes(exercise.primaryMuscle);
+    }
+    if (focus === "glutes_hamstrings") {
+      return ["glutes", "hamstrings"].includes(exercise.primaryMuscle);
+    }
+    if (focus === "quads_calves") {
+      return ["quads", "calves"].includes(exercise.primaryMuscle);
+    }
+    if (focus === "shoulders" || focus === "shoulders_arms") {
+      return ["shoulders", "front_delts", "side_delts", "rear_delts", "biceps", "triceps"].includes(
+        exercise.primaryMuscle
+      );
+    }
+    if (focus === "arms") {
+      return ["biceps", "triceps", "forearms"].includes(exercise.primaryMuscle);
+    }
+    if (focus === "push") {
+      return ["chest", "shoulders", "front_delts", "side_delts", "triceps"].includes(
+        exercise.primaryMuscle
+      );
+    }
+    if (focus === "pull" || focus === "upper") {
+      return [
+        "back",
+        "lats",
+        "upper_back",
+        "rear_delts",
+        "biceps",
+        "shoulders",
+        "chest",
+        "triceps",
+      ].includes(exercise.primaryMuscle);
+    }
+    if (focus === "full_body") return true;
+    if (focus === "unilateral_lower") {
+      return (
+        exercise.laterality === "unilateral" &&
+        ["quads", "glutes", "hamstrings"].includes(exercise.primaryMuscle)
+      );
+    }
     return false;
   });
 }
 
-function getLegFocus(emphasis?: MuscleEmphasis | ""): LegFocus {
-  if (emphasis === "quad_bias") return "quad_bias";
-  if (emphasis === "glute_bias" || emphasis === "hamstring_bias") return "glute_ham_bias";
-  return "balanced";
-}
-
-function buildSlotSelector(slot: TemplateSlot, bodyPart: BodyPart) {
-  return (exercise: Exercise) => {
-    switch (slot) {
-      case "primary_press":
-        return (
-          exercise.category === "main" &&
-          exercise.movementPattern === "horizontal_press" &&
-          exercise.primaryMuscle === "chest"
-        );
-
-      case "secondary_press":
-        return (
-          ["main", "accessory"].includes(exercise.category) &&
-          exercise.movementPattern === "horizontal_press" &&
-          exercise.primaryMuscle === "chest"
-        );
-
-      case "upper_bias_press":
-        return (
-          ["main", "accessory"].includes(exercise.category) &&
-          exercise.movementPattern === "horizontal_press" &&
-          exercise.emphasis?.includes("upper_chest")
-        );
-
-      case "stable_press":
-        return (
-          ["main", "accessory"].includes(exercise.category) &&
-          exercise.movementPattern === "horizontal_press" &&
-          exercise.isStable
-        );
-
-      case "stretch_chest_iso":
-        return (
-          exercise.category === "isolation" &&
-          exercise.primaryMuscle === "chest" &&
-          exercise.movementPattern === "fly"
-        );
-
-      case "squeeze_chest_iso":
-        return (
-          exercise.category === "isolation" &&
-          exercise.primaryMuscle === "chest" &&
-          exercise.movementPattern === "fly" &&
-          exercise.isStable
-        );
-
-      case "back_row_primary":
-        return exercise.category === "main" && exercise.movementPattern === "horizontal_pull";
-
-      case "back_row_secondary":
-        return (
-          ["main", "accessory"].includes(exercise.category) &&
-          exercise.movementPattern === "horizontal_pull"
-        );
-
-      case "back_vertical_pull":
-        return (
-          ["main", "accessory"].includes(exercise.category) &&
-          (exercise.movementPattern === "vertical_pull" ||
-            exercise.movementPattern === "bodyweight_pull")
-        );
-
-      case "lat_isolation":
-        return (
-          exercise.primaryMuscle === "lats" &&
-          (exercise.emphasis?.includes("lat_width") ||
-            exercise.movementPattern === "vertical_pull")
-        );
-
-      case "legs_main_knee":
-        return (
-          ["main", "accessory"].includes(exercise.category) &&
-          ["squat", "lunge"].includes(exercise.movementPattern) &&
-          ["quads", "glutes"].includes(exercise.primaryMuscle)
-        );
-
-      case "legs_main_hinge":
-        return (
-          ["main", "accessory"].includes(exercise.category) &&
-          exercise.movementPattern === "hinge" &&
-          ["hamstrings", "glutes"].includes(exercise.primaryMuscle)
-        );
-
-      case "legs_secondary_knee":
-        return (
-          ["main", "accessory"].includes(exercise.category) &&
-          ["squat", "lunge"].includes(exercise.movementPattern)
-        );
-
-      case "legs_unilateral":
-        return (
-          exercise.laterality === "unilateral" &&
-          ["quads", "glutes", "hamstrings"].includes(exercise.primaryMuscle)
-        );
-
-      case "legs_quad_iso":
-        return (
-          exercise.category === "isolation" &&
-          exercise.primaryMuscle === "quads"
-        );
-
-      case "legs_ham_iso":
-        return (
-          exercise.category === "isolation" &&
-          exercise.primaryMuscle === "hamstrings"
-        );
-
-      case "legs_glute_iso":
-        return (
-          (exercise.primaryMuscle === "glutes" &&
-            ["accessory", "isolation"].includes(exercise.category)) ||
-          exercise.emphasis?.includes("glute_bias")
-        );
-
-      case "calves":
-        return exercise.primaryMuscle === "calves";
-
-      case "shoulder_press":
-        return (
-          ["main", "accessory"].includes(exercise.category) &&
-          exercise.movementPattern === "vertical_press"
-        );
-
-      case "side_delt":
-        return (
-          exercise.primaryMuscle === "side_delts" &&
-          exercise.movementPattern === "raise"
-        );
-
-      case "rear_delt":
-        return (
-          exercise.primaryMuscle === "rear_delts" &&
-          exercise.movementPattern === "raise"
-        );
-
-      case "biceps_primary":
-        return (
-          ["accessory", "isolation"].includes(exercise.category) &&
-          exercise.primaryMuscle === "biceps" &&
-          exercise.movementPattern === "curl"
-        );
-
-      case "biceps_secondary":
-        return exercise.primaryMuscle === "biceps";
-
-      case "triceps_primary":
-        return (
-          ["accessory", "isolation"].includes(exercise.category) &&
-          exercise.primaryMuscle === "triceps" &&
-          exercise.movementPattern === "tricep_extension"
-        );
-
-      case "triceps_secondary":
-        return exercise.primaryMuscle === "triceps";
-
-      case "core":
-        return exercise.primaryMuscle === "core";
-
-      case "finisher":
-        if (bodyPart === "chest") {
-          return ["chest", "triceps", "front_delts"].includes(exercise.primaryMuscle);
-        }
-        if (bodyPart === "back") {
-          return ["back", "lats", "upper_back", "biceps", "rear_delts"].includes(
-            exercise.primaryMuscle
-          );
-        }
-        if (bodyPart === "legs") {
-          return ["quads", "glutes", "hamstrings", "calves"].includes(exercise.primaryMuscle);
-        }
-        if (bodyPart === "shoulders") {
-          return ["shoulders", "front_delts", "side_delts", "rear_delts"].includes(
-            exercise.primaryMuscle
-          );
-        }
-        if (bodyPart === "arms") {
-          return ["biceps", "triceps", "forearms"].includes(exercise.primaryMuscle);
-        }
-        return true;
-
-      default:
-        return false;
-    }
-  };
-}
-
-function getLegTemplate(
-  volumeTier: VolumeTier,
-  emphasis?: MuscleEmphasis | ""
-): SlotDefinition[] {
-  const focus = getLegFocus(emphasis);
-
-  if (focus === "quad_bias") {
-    if (volumeTier === "brutal") {
-      return [
-        { slot: "legs_main_knee", sets: 4 },
-        { slot: "legs_secondary_knee", sets: 4 },
-        { slot: "legs_unilateral", sets: 3 },
-        { slot: "legs_quad_iso", sets: 3 },
-        { slot: "legs_ham_iso", sets: 3 },
-        { slot: "calves", sets: 4 },
-      ];
-    }
-
-    if (volumeTier === "high") {
-      return [
-        { slot: "legs_main_knee", sets: 4 },
-        { slot: "legs_secondary_knee", sets: 3 },
-        { slot: "legs_unilateral", sets: 3 },
-        { slot: "legs_quad_iso", sets: 3 },
-        { slot: "legs_ham_iso", sets: 2 },
-        { slot: "calves", sets: 3 },
-      ];
-    }
-
-    return [
-      { slot: "legs_main_knee", sets: 4 },
-      { slot: "legs_unilateral", sets: 3 },
-      { slot: "legs_quad_iso", sets: 3 },
-      { slot: "legs_ham_iso", sets: 2 },
-      { slot: "calves", sets: 3 },
-    ];
-  }
-
-  if (focus === "glute_ham_bias") {
-    if (volumeTier === "brutal") {
-      return [
-        { slot: "legs_main_hinge", sets: 4 },
-        { slot: "legs_unilateral", sets: 4 },
-        { slot: "legs_secondary_knee", sets: 3 },
-        { slot: "legs_ham_iso", sets: 3 },
-        { slot: "legs_glute_iso", sets: 3 },
-        { slot: "calves", sets: 4 },
-      ];
-    }
-
-    if (volumeTier === "high") {
-      return [
-        { slot: "legs_main_hinge", sets: 4 },
-        { slot: "legs_unilateral", sets: 3 },
-        { slot: "legs_secondary_knee", sets: 3 },
-        { slot: "legs_ham_iso", sets: 3 },
-        { slot: "legs_glute_iso", sets: 2 },
-        { slot: "calves", sets: 3 },
-      ];
-    }
-
-    return [
-      { slot: "legs_main_hinge", sets: 4 },
-      { slot: "legs_unilateral", sets: 3 },
-      { slot: "legs_ham_iso", sets: 3 },
-      { slot: "legs_glute_iso", sets: 2 },
-      { slot: "calves", sets: 3 },
-    ];
-  }
-
-  if (volumeTier === "brutal") {
-    return [
-      { slot: "legs_main_knee", sets: 4 },
-      { slot: "legs_main_hinge", sets: 4 },
-      { slot: "legs_unilateral", sets: 3 },
-      { slot: "legs_quad_iso", sets: 3 },
-      { slot: "legs_ham_iso", sets: 3 },
-      { slot: "calves", sets: 4 },
-    ];
-  }
-
-  if (volumeTier === "high") {
-    return [
-      { slot: "legs_main_knee", sets: 4 },
-      { slot: "legs_main_hinge", sets: 4 },
-      { slot: "legs_unilateral", sets: 3 },
-      { slot: "legs_quad_iso", sets: 3 },
-      { slot: "legs_ham_iso", sets: 2 },
-      { slot: "calves", sets: 3 },
-    ];
-  }
-
-  return [
-    { slot: "legs_main_knee", sets: 4 },
-    { slot: "legs_main_hinge", sets: 3 },
-    { slot: "legs_unilateral", sets: 3 },
-    { slot: "legs_quad_iso", sets: 2 },
-    { slot: "legs_ham_iso", sets: 2 },
-    { slot: "calves", sets: 3 },
-  ];
-}
-
-function getTemplate(
+function getCandidatePool(
   bodyPart: BodyPart,
-  volumeTier: VolumeTier,
-  emphasis?: MuscleEmphasis | ""
-): SlotDefinition[] {
-  const upperChestBias = emphasis === "upper_chest";
-  const latBias = emphasis === "lat_width";
-  const sideDeltBias = emphasis === "side_delt_bias";
+  equipmentAccess: EquipmentAccess,
+  experienceLevel: ExperienceLevel
+) {
+  const pool = exerciseLibrary.filter(
+    (exercise) => isExerciseValidForUser(exercise, equipmentAccess, experienceLevel)
+  );
 
-  if (bodyPart === "chest") {
-    if (volumeTier === "brutal") {
-      return [
-        { slot: upperChestBias ? "upper_bias_press" : "primary_press", sets: 4 },
-        { slot: "secondary_press", sets: 4 },
-        { slot: "upper_bias_press", sets: 4 },
-        { slot: "stable_press", sets: 4 },
-        { slot: "stretch_chest_iso", sets: 3 },
-        { slot: "squeeze_chest_iso", sets: 3 },
-        { slot: "finisher", sets: 2 },
-      ];
-    }
-
-    if (volumeTier === "high") {
-      return [
-        { slot: upperChestBias ? "upper_bias_press" : "primary_press", sets: 4 },
-        { slot: "secondary_press", sets: 4 },
-        { slot: "stable_press", sets: 3 },
-        { slot: "stretch_chest_iso", sets: 3 },
-        { slot: "squeeze_chest_iso", sets: 3 },
-        { slot: "finisher", sets: 2 },
-      ];
-    }
-
-    return [
-      { slot: upperChestBias ? "upper_bias_press" : "primary_press", sets: 4 },
-      { slot: "secondary_press", sets: 3 },
-      { slot: "stretch_chest_iso", sets: 3 },
-      { slot: "squeeze_chest_iso", sets: 2 },
-      { slot: "finisher", sets: 2 },
-    ];
-  }
-
-  if (bodyPart === "back") {
-    if (volumeTier === "brutal") {
-      return [
-        { slot: latBias ? "back_vertical_pull" : "back_row_primary", sets: 4 },
-        { slot: "back_vertical_pull", sets: 4 },
-        { slot: "back_row_secondary", sets: 4 },
-        { slot: "back_vertical_pull", sets: 3 },
-        { slot: "lat_isolation", sets: 3 },
-        { slot: "back_row_secondary", sets: 3 },
-        { slot: "finisher", sets: 2 },
-      ];
-    }
-
-    if (volumeTier === "high") {
-      return [
-        { slot: latBias ? "back_vertical_pull" : "back_row_primary", sets: 4 },
-        { slot: "back_vertical_pull", sets: 4 },
-        { slot: "back_row_secondary", sets: 3 },
-        { slot: "lat_isolation", sets: 3 },
-        { slot: "back_row_secondary", sets: 3 },
-        { slot: "finisher", sets: 2 },
-      ];
-    }
-
-    return [
-      { slot: latBias ? "back_vertical_pull" : "back_row_primary", sets: 4 },
-      { slot: "back_vertical_pull", sets: 3 },
-      { slot: "back_row_secondary", sets: 3 },
-      { slot: "lat_isolation", sets: 3 },
-      { slot: "finisher", sets: 2 },
-    ];
-  }
-
-  if (bodyPart === "legs") {
-    return getLegTemplate(volumeTier, emphasis);
-  }
-
-  if (bodyPart === "shoulders") {
-    if (volumeTier === "brutal") {
-      return [
-        { slot: "shoulder_press", sets: 4 },
-        { slot: "side_delt", sets: sideDeltBias ? 5 : 4 },
-        { slot: "rear_delt", sets: 4 },
-        { slot: "shoulder_press", sets: 3 },
-        { slot: "side_delt", sets: 4 },
-        { slot: "rear_delt", sets: 3 },
-      ];
-    }
-
-    if (volumeTier === "high") {
-      return [
-        { slot: "shoulder_press", sets: 4 },
-        { slot: "side_delt", sets: sideDeltBias ? 5 : 4 },
-        { slot: "rear_delt", sets: 3 },
-        { slot: "side_delt", sets: 3 },
-        { slot: "rear_delt", sets: 3 },
-      ];
-    }
-
-    return [
-      { slot: "shoulder_press", sets: 4 },
-      { slot: "side_delt", sets: 3 },
-      { slot: "rear_delt", sets: 3 },
-      { slot: "side_delt", sets: 3 },
-    ];
-  }
-
-  if (bodyPart === "arms") {
-    if (volumeTier === "brutal") {
-      return [
-        { slot: "biceps_primary", sets: 4 },
-        { slot: "triceps_primary", sets: 4 },
-        { slot: "biceps_secondary", sets: 4 },
-        { slot: "triceps_secondary", sets: 4 },
-        { slot: "biceps_secondary", sets: 3 },
-        { slot: "triceps_secondary", sets: 3 },
-      ];
-    }
-
-    if (volumeTier === "high") {
-      return [
-        { slot: "biceps_primary", sets: 4 },
-        { slot: "triceps_primary", sets: 4 },
-        { slot: "biceps_secondary", sets: 3 },
-        { slot: "triceps_secondary", sets: 3 },
-        { slot: "biceps_secondary", sets: 3 },
-        { slot: "triceps_secondary", sets: 3 },
-      ];
-    }
-
-    return [
-      { slot: "biceps_primary", sets: 3 },
-      { slot: "triceps_primary", sets: 3 },
-      { slot: "biceps_secondary", sets: 3 },
-      { slot: "triceps_secondary", sets: 3 },
-    ];
-  }
+  if (bodyPart === "full_body") return pool;
 
   if (bodyPart === "push") {
-    return [
-      ...getTemplate("chest", volumeTier === "brutal" ? "high" : "moderate", emphasis).slice(
-        0,
-        3
-      ),
-      ...getTemplate("shoulders", "moderate", emphasis).slice(0, 2),
-      ...getTemplate("arms", "moderate", emphasis).slice(1, 2),
-    ];
+    return pool.filter((exercise) =>
+      ["chest", "shoulders", "front_delts", "side_delts", "triceps"].includes(
+        exercise.primaryMuscle
+      )
+    );
   }
 
   if (bodyPart === "pull") {
-    return [
-      ...getTemplate("back", volumeTier === "brutal" ? "high" : "moderate", emphasis).slice(
-        0,
-        4
-      ),
-      { slot: "rear_delt", sets: 3 },
-      { slot: "biceps_primary", sets: 3 },
-    ];
+    return pool.filter((exercise) =>
+      ["back", "lats", "upper_back", "lower_back", "rear_delts", "biceps", "forearms"].includes(
+        exercise.primaryMuscle
+      )
+    );
   }
 
-  if (bodyPart === "full_body") {
-    return [
-      { slot: "legs_main_knee", sets: 3 },
-      { slot: "back_row_primary", sets: 3 },
-      { slot: "primary_press", sets: 3 },
-      { slot: "back_vertical_pull", sets: 3 },
-      { slot: "shoulder_press", sets: 2 },
-      { slot: "core", sets: 3 },
-    ];
+  if (bodyPart === "legs") {
+    return pool.filter((exercise) =>
+      ["quads", "glutes", "hamstrings", "calves"].includes(exercise.primaryMuscle)
+    );
   }
 
-  return [{ slot: "core", sets: 3 }];
+  if (bodyPart === "shoulders") {
+    return pool.filter((exercise) =>
+      ["shoulders", "front_delts", "side_delts", "rear_delts", "triceps", "biceps"].includes(
+        exercise.primaryMuscle
+      )
+    );
+  }
+
+  if (bodyPart === "arms") {
+    return pool.filter((exercise) =>
+      ["biceps", "triceps", "forearms", "side_delts"].includes(exercise.primaryMuscle)
+    );
+  }
+
+  if (bodyPart === "chest") {
+    return pool.filter((exercise) =>
+      ["chest", "front_delts", "triceps", "side_delts"].includes(exercise.primaryMuscle)
+    );
+  }
+
+  if (bodyPart === "back") {
+    return pool.filter((exercise) =>
+      ["back", "lats", "upper_back", "rear_delts", "biceps"].includes(exercise.primaryMuscle)
+    );
+  }
+
+  return pool;
+}
+
+function chooseIdentity(params: {
+  bodyPart: BodyPart;
+  goal: Goal;
+  duration: number;
+  equipmentAccess: EquipmentAccess;
+  emphasis?: MuscleEmphasis | "";
+  variationIndex: number;
+}): SessionPlan {
+  const { bodyPart, goal, duration, equipmentAccess, emphasis = "", variationIndex } = params;
+
+  const brutal = duration >= 75;
+  const highish = duration >= 50;
+
+  if (bodyPart === "chest") {
+    const identities: SessionPlan[] = [
+      {
+        identity: "Chest Strength Session",
+        focuses: ["chest", "chest_triceps"],
+        unilateralTarget: 0,
+        summary: "A press-led chest day built around a strong anchor and clean supporting work.",
+        slots: brutal
+          ? [
+              { slot: "anchor", sets: 4 },
+              { slot: "primary", sets: 4 },
+              { slot: "secondary", sets: 3 },
+              { slot: "triceps_iso", sets: 3 },
+              { slot: "finisher", sets: 2 },
+            ]
+          : [
+              { slot: "anchor", sets: 4 },
+              { slot: "primary", sets: 3 },
+              { slot: "secondary", sets: 3 },
+              { slot: "finisher", sets: 2 },
+            ],
+      },
+      {
+        identity: "Upper Chest Focus",
+        focuses: ["chest", "chest_shoulders"],
+        unilateralTarget: 0,
+        summary: "An upper-chest biased session using incline-friendly choices and chest support work.",
+        slots: highish
+          ? [
+              { slot: "anchor", sets: 4 },
+              { slot: "primary", sets: 4 },
+              { slot: "secondary", sets: 3 },
+              { slot: "side_delt_iso", sets: 3, optional: true },
+              { slot: "finisher", sets: 2 },
+            ]
+          : [
+              { slot: "anchor", sets: 4 },
+              { slot: "primary", sets: 3 },
+              { slot: "finisher", sets: 3 },
+            ],
+      },
+      {
+        identity: "Chest Volume Session",
+        focuses: ["chest", "chest_triceps", "chest_shoulders"],
+        unilateralTarget: 0,
+        summary: "A more fatigue-friendly chest session focused on quality volume and tension.",
+        slots: [
+          { slot: "anchor", sets: 3 },
+          { slot: "primary", sets: 3 },
+          { slot: "secondary", sets: 3 },
+          { slot: "triceps_iso", sets: 3, optional: true },
+          { slot: "finisher", sets: 3 },
+        ],
+      },
+    ];
+
+    if (emphasis === "upper_chest") return identities[1];
+    return rotateArray(identities, variationIndex)[0];
+  }
+
+  if (bodyPart === "back") {
+    const identities: SessionPlan[] = [
+      {
+        identity: "Back Density Session",
+        focuses: ["back", "back_biceps"],
+        unilateralTarget: equipmentAccess === "dumbbells_only" ? 1 : 0,
+        summary: "A row-dominant back session built for thickness, control, and biceps support.",
+        slots: [
+          { slot: "anchor", sets: 4 },
+          { slot: "primary", sets: 3 },
+          { slot: "secondary", sets: 3 },
+          { slot: "biceps_iso", sets: 3 },
+          { slot: "finisher", sets: 2, optional: true },
+        ],
+      },
+      {
+        identity: "Lat Focus Pull Day",
+        focuses: ["back", "back_biceps"],
+        unilateralTarget: 0,
+        summary: "A pull session with more vertical emphasis for lat width and cleaner arm overlap.",
+        slots: [
+          { slot: "anchor", sets: 4 },
+          { slot: "primary", sets: 3 },
+          { slot: "lat_iso", sets: 3 },
+          { slot: "biceps_iso", sets: 3 },
+          { slot: "rear_delt_iso", sets: 2, optional: true },
+        ],
+      },
+      {
+        identity: "Balanced Pull Session",
+        focuses: ["back", "back_biceps", "back_rear_delts"],
+        unilateralTarget: 1,
+        summary: "A balanced pull day mixing width, thickness, rear delts, and arm work.",
+        slots: [
+          { slot: "anchor", sets: 4 },
+          { slot: "primary", sets: 3 },
+          { slot: "unilateral", sets: 3, optional: true },
+          { slot: "rear_delt_iso", sets: 3 },
+          { slot: "biceps_iso", sets: 3 },
+        ],
+      },
+    ];
+
+    if (emphasis === "lat_width") return identities[1];
+    if (emphasis === "mid_back_thickness") return identities[0];
+    return rotateArray(identities, variationIndex)[0];
+  }
+
+  if (bodyPart === "legs") {
+    const identities: SessionPlan[] = [
+      {
+        identity: "Quad Focus Lower",
+        focuses: ["legs", "quads_glutes", "quads_calves"],
+        unilateralTarget:
+          equipmentAccess === "bodyweight_only" ? 1 : variationIndex % 3 === 0 ? 1 : 0,
+        summary: "A knee-dominant lower day built to drive quad work without drifting into junk fatigue.",
+        slots: highish
+          ? [
+              { slot: "anchor", sets: 4 },
+              { slot: "primary", sets: 3 },
+              { slot: "unilateral", sets: 3, optional: true },
+              { slot: "quad_iso", sets: 3 },
+              { slot: "ham_iso", sets: 2 },
+              { slot: "calves", sets: 3 },
+            ]
+          : [
+              { slot: "anchor", sets: 4 },
+              { slot: "primary", sets: 3 },
+              { slot: "quad_iso", sets: 3 },
+              { slot: "calves", sets: 3 },
+            ],
+      },
+      {
+        identity: "Glute + Hamstring Session",
+        focuses: ["legs", "glutes_hamstrings"],
+        unilateralTarget: variationIndex % 2 === 0 ? 1 : 0,
+        summary: "A posterior-chain lower session focused on glutes, hamstrings, and stable fatigue.",
+        slots: [
+          { slot: "anchor", sets: 4 },
+          { slot: "unilateral", sets: 3, optional: true },
+          { slot: "secondary", sets: 3 },
+          { slot: "ham_iso", sets: 3 },
+          { slot: "glute_iso", sets: 2 },
+          { slot: "calves", sets: 3, optional: true },
+        ],
+      },
+      {
+        identity: "Balanced Lower Session",
+        focuses: ["legs", "quads_glutes", "glutes_hamstrings"],
+        unilateralTarget: variationIndex % 3 === 1 ? 1 : 0,
+        summary: "A balanced lower-body day with one strong driver and enough support work to cover the whole lower body well.",
+        slots: [
+          { slot: "anchor", sets: 4 },
+          { slot: "primary", sets: 3 },
+          { slot: "secondary", sets: 3 },
+          { slot: "unilateral", sets: 3, optional: true },
+          { slot: "quad_iso", sets: 2, optional: true },
+          { slot: "ham_iso", sets: 2, optional: true },
+          { slot: "calves", sets: 3 },
+        ],
+      },
+      {
+        identity: "Unilateral Lower Session",
+        focuses: ["legs", "unilateral_lower", "glutes_hamstrings", "quads_glutes"],
+        unilateralTarget: 2,
+        summary: "A lower-body session that intentionally uses more single-leg work for balance, control, and variation.",
+        slots: [
+          { slot: "anchor", sets: 3 },
+          { slot: "unilateral", sets: 3 },
+          { slot: "secondary_alt", sets: 3 },
+          { slot: "glute_iso", sets: 2, optional: true },
+          { slot: "ham_iso", sets: 2, optional: true },
+          { slot: "calves", sets: 3, optional: true },
+        ],
+      },
+    ];
+
+    if (emphasis === "quad_bias") return identities[0];
+    if (emphasis === "glute_bias" || emphasis === "hamstring_bias") return identities[1];
+    return rotateArray(identities, variationIndex)[0];
+  }
+
+  if (bodyPart === "shoulders") {
+    return {
+      identity: variationIndex % 2 === 0 ? "Shoulder Focus Session" : "Shoulders + Arms Session",
+      focuses:
+        variationIndex % 2 === 0
+          ? ["shoulders", "chest_shoulders"]
+          : ["shoulders", "shoulders_arms"],
+      unilateralTarget: variationIndex % 2 === 0 ? 1 : 0,
+      summary:
+        variationIndex % 2 === 0
+          ? "A delt-focused upper session built around shoulder pressing and lateral/rear-delt support."
+          : "A shoulder-led session with useful arm overlap and enough variety to feel complete.",
+      slots:
+        variationIndex % 2 === 0
+          ? [
+              { slot: "anchor", sets: 4 },
+              { slot: "side_delt_iso", sets: 3 },
+              { slot: "rear_delt_iso", sets: 3 },
+              { slot: "unilateral", sets: 2, optional: true },
+              { slot: "triceps_iso", sets: 2, optional: true },
+            ]
+          : [
+              { slot: "anchor", sets: 4 },
+              { slot: "side_delt_iso", sets: 3 },
+              { slot: "triceps_iso", sets: 3 },
+              { slot: "biceps_iso", sets: 3 },
+              { slot: "rear_delt_iso", sets: 2 },
+            ],
+    };
+  }
+
+  if (bodyPart === "arms") {
+    return {
+      identity: "Arm Focus Session",
+      focuses: ["arms", "shoulders_arms"],
+      unilateralTarget: variationIndex % 3 === 0 ? 1 : 0,
+      summary: "An arm-focused session built around clean curls, triceps work, and just enough support work to feel complete.",
+      slots: [
+        { slot: "biceps_iso", sets: 3 },
+        { slot: "triceps_iso", sets: 3 },
+        { slot: "primary", sets: 3, optional: true },
+        { slot: "secondary", sets: 3, optional: true },
+        { slot: "side_delt_iso", sets: 2, optional: true },
+        { slot: "finisher", sets: 2, optional: true },
+      ],
+    };
+  }
+
+  if (bodyPart === "push") {
+    return {
+      identity: "Push Training Session",
+      focuses: ["push", "chest_triceps", "chest_shoulders"],
+      unilateralTarget: variationIndex % 4 === 0 ? 1 : 0,
+      summary: "A push day blending chest, shoulders, and triceps around one strong pressing anchor.",
+      slots: [
+        { slot: "anchor", sets: 4 },
+        { slot: "primary", sets: 3 },
+        { slot: "side_delt_iso", sets: 3 },
+        { slot: "triceps_iso", sets: 3 },
+        { slot: "finisher", sets: 2, optional: true },
+      ],
+    };
+  }
+
+  if (bodyPart === "pull") {
+    return {
+      identity: "Pull Training Session",
+      focuses: ["pull", "back_biceps", "back_rear_delts"],
+      unilateralTarget: variationIndex % 3 === 0 ? 1 : 0,
+      summary: "A pull day balancing rows, pulldowns, rear delts, and biceps for a more complete upper session.",
+      slots: [
+        { slot: "anchor", sets: 4 },
+        { slot: "primary", sets: 3 },
+        { slot: "secondary", sets: 3 },
+        { slot: "rear_delt_iso", sets: 3 },
+        { slot: "biceps_iso", sets: 3 },
+      ],
+    };
+  }
+
+  return goal === "strength"
+    ? {
+        identity: "Full Body Performance",
+        focuses: ["full_body", "upper", "lower"],
+        unilateralTarget: 0,
+        summary: "A full-body session built around big patterns, clean loading, and broad stimulus.",
+        slots: [
+          { slot: "anchor", sets: 3 },
+          { slot: "primary", sets: 3 },
+          { slot: "secondary", sets: 3 },
+          { slot: "core", sets: 3 },
+          { slot: "finisher", sets: 2, optional: true },
+        ],
+      }
+    : {
+        identity: "Full Body Training Session",
+        focuses: ["full_body", "upper", "lower"],
+        unilateralTarget: variationIndex % 3 === 0 ? 1 : 0,
+        summary: "A full-body training session that spreads quality work across the body without becoming chaotic.",
+        slots: [
+          { slot: "anchor", sets: 3 },
+          { slot: "primary", sets: 3 },
+          { slot: "secondary", sets: 3 },
+          { slot: "unilateral", sets: 2, optional: true },
+          { slot: "core", sets: 3 },
+        ],
+      };
+}
+
+function isAnchorCandidate(exercise: Exercise, plan: SessionPlan) {
+  const role = inferLiftRole(exercise);
+  return (
+    role === "anchor" &&
+    matchesAnyFocus(exercise, plan.focuses) &&
+    exercise.category === "main"
+  );
+}
+
+function isPrimaryCandidate(exercise: Exercise, plan: SessionPlan) {
+  const role = inferLiftRole(exercise);
+  return (
+    matchesAnyFocus(exercise, plan.focuses) &&
+    (role === "primary" || role === "anchor" || exercise.category === "main")
+  );
+}
+
+function isSecondaryCandidate(exercise: Exercise, plan: SessionPlan) {
+  const role = inferLiftRole(exercise);
+  return (
+    matchesAnyFocus(exercise, plan.focuses) &&
+    (role === "secondary" || role === "primary" || exercise.category === "accessory")
+  );
+}
+
+function isUnilateralCandidate(exercise: Exercise, plan: SessionPlan) {
+  return (
+    exercise.laterality === "unilateral" &&
+    matchesAnyFocus(exercise, plan.focuses) &&
+    ["accessory", "isolation", "main"].includes(exercise.category)
+  );
+}
+
+function getSlotCandidates(
+  slot: SessionSlot,
+  pool: Exercise[],
+  plan: SessionPlan
+): Exercise[] {
+  switch (slot) {
+    case "anchor":
+      return pool.filter((exercise) => isAnchorCandidate(exercise, plan));
+
+    case "primary":
+      return pool.filter((exercise) => isPrimaryCandidate(exercise, plan));
+
+    case "secondary":
+    case "secondary_alt":
+      return pool.filter((exercise) => isSecondaryCandidate(exercise, plan));
+
+    case "unilateral":
+      return pool.filter((exercise) => isUnilateralCandidate(exercise, plan));
+
+    case "lat_iso":
+      return pool.filter(
+        (exercise) =>
+          exercise.primaryMuscle === "lats" &&
+          (exercise.category === "isolation" ||
+            exercise.emphasis?.includes("lat_width") ||
+            exercise.movementPattern === "vertical_pull")
+      );
+
+    case "quad_iso":
+      return pool.filter(
+        (exercise) => exercise.primaryMuscle === "quads" && exercise.category === "isolation"
+      );
+
+    case "ham_iso":
+      return pool.filter(
+        (exercise) => exercise.primaryMuscle === "hamstrings" && exercise.category === "isolation"
+      );
+
+    case "glute_iso":
+      return pool.filter(
+        (exercise) =>
+          exercise.primaryMuscle === "glutes" &&
+          ["accessory", "isolation"].includes(exercise.category)
+      );
+
+    case "side_delt_iso":
+      return pool.filter(
+        (exercise) =>
+          exercise.primaryMuscle === "side_delts" &&
+          exercise.movementPattern === "raise"
+      );
+
+    case "rear_delt_iso":
+      return pool.filter(
+        (exercise) =>
+          exercise.primaryMuscle === "rear_delts" &&
+          exercise.movementPattern === "raise"
+      );
+
+    case "biceps_iso":
+      return pool.filter(
+        (exercise) =>
+          exercise.primaryMuscle === "biceps" && exercise.movementPattern === "curl"
+      );
+
+    case "triceps_iso":
+      return pool.filter(
+        (exercise) =>
+          exercise.primaryMuscle === "triceps" &&
+          exercise.movementPattern === "tricep_extension"
+      );
+
+    case "calves":
+      return pool.filter((exercise) => exercise.primaryMuscle === "calves");
+
+    case "core":
+      return pool.filter((exercise) => exercise.primaryMuscle === "core");
+
+    case "finisher":
+      return pool.filter((exercise) => matchesAnyFocus(exercise, plan.focuses));
+
+    default:
+      return pool;
+  }
 }
 
 function scoreExerciseForStyle(exercise: Exercise, style: WorkoutStyle) {
@@ -848,29 +969,14 @@ function scoreExerciseForGoal(exercise: Exercise, goal: Goal) {
     if (exercise.category === "accessory") score += 3;
     if (exercise.category === "isolation") score += 4;
     if (exercise.isStable) score += 1;
-
-    if (
-      ["quads", "glutes", "hamstrings"].includes(exercise.primaryMuscle) &&
-      exercise.isStable
-    ) {
-      score += 2;
-    }
   }
 
   if (goal === "fat_loss") {
     if (exercise.category === "accessory") score += 2;
     if (
-      ["lunge", "core", "bodyweight_push", "bodyweight_pull"].includes(
-        exercise.movementPattern
-      )
+      ["lunge", "core", "bodyweight_push", "bodyweight_pull"].includes(exercise.movementPattern)
     ) {
       score += 2;
-    }
-    if (
-      ["quads", "glutes", "hamstrings"].includes(exercise.primaryMuscle) &&
-      exercise.isStable
-    ) {
-      score += 1;
     }
   }
 
@@ -885,19 +991,28 @@ function scoreExerciseForEmphasis(exercise: Exercise, emphasis?: MuscleEmphasis 
   if (!emphasis) return 0;
   if (exercise.emphasis?.includes(emphasis)) return 6;
 
-  if (
-    emphasis === "glute_bias" &&
-    ["glutes", "hamstrings"].includes(exercise.primaryMuscle)
-  ) {
+  if (emphasis === "glute_bias" && ["glutes", "hamstrings"].includes(exercise.primaryMuscle)) {
+    return 3;
+  }
+
+  if (emphasis === "quad_bias" && ["quads", "glutes"].includes(exercise.primaryMuscle)) {
     return 3;
   }
 
   return 0;
 }
 
+function scoreExerciseForEquipment(
+  exercise: Exercise,
+  equipmentAccess: EquipmentAccess
+) {
+  return getEquipmentFitScore(exercise, equipmentAccess);
+}
+
 function scoreExerciseForStructure(
   exercise: Exercise,
   selected: Exercise[],
+  slot: SessionSlot,
   bodyPart: BodyPart
 ) {
   let score = 0;
@@ -911,169 +1026,153 @@ function scoreExerciseForStructure(
 
   score -= samePrimaryCount * 2;
 
-  if (bodyPart === "legs") {
-    score -= samePatternCount * 1;
-  } else {
-    score -= samePatternCount * 3;
-  }
+  if (bodyPart === "legs") score -= samePatternCount * 1;
+  else score -= samePatternCount * 2;
 
-  if (
-    exercise.category === "main" &&
-    selected.filter((item) => item.category === "main").length >= 2 &&
-    bodyPart !== "legs"
-  ) {
-    score -= 3;
-  }
+  if (slot === "anchor" && inferLiftRole(exercise) === "anchor") score += 5;
+  if (slot === "unilateral" && exercise.laterality === "unilateral") score += 5;
+  if (slot === "finisher" && exercise.category === "isolation") score += 3;
 
   return score;
 }
 
-function pickRepRange(goal: Goal, style: WorkoutStyle, exercise: Exercise) {
-  if (goal === "strength") {
-    if (exercise.category === "main") return "4-6";
-    if (exercise.category === "accessory") return "6-8";
-    return "8-12";
-  }
-
-  if (style === "pump") {
-    if (exercise.category === "main") return "8-10";
-    if (exercise.category === "accessory") return "10-15";
-    return "12-20";
-  }
-
-  if (style === "high_volume") {
-    if (exercise.category === "main") return "6-10";
-    if (exercise.category === "accessory") return "8-12";
-    return "12-20";
-  }
-
-  if (style === "bodybuilding") {
-    if (exercise.category === "main") return "6-8";
-    if (exercise.category === "accessory") return "8-12";
-    return "10-15";
-  }
-
-  if (style === "strength_size") {
-    if (exercise.category === "main") return "5-8";
-    if (exercise.category === "accessory") return "8-10";
-    return "10-15";
-  }
-
-  if (goal === "fat_loss") {
-    if (exercise.category === "main") return "8-10";
-    if (exercise.category === "accessory") return "10-12";
-    return "12-15";
-  }
-
-  if (goal === "general") {
-    if (exercise.category === "main") return "6-10";
-    if (exercise.category === "accessory") return "8-12";
-    return "10-15";
-  }
-
-  if (exercise.category === "main") return "6-8";
-  if (exercise.category === "accessory") return "8-12";
-  return "10-15";
+function scoreExerciseForVariation(
+  exercise: Exercise,
+  slotIndex: number,
+  variationIndex: number
+) {
+  const pseudo = (slotIndex + 1) * 7 + (variationIndex + 1) * 13 + exercise.id.length;
+  return pseudo % 5;
 }
 
-function getRestSeconds(goal: Goal, style: WorkoutStyle, exercise: Exercise) {
-  if (goal === "strength") {
-    if (exercise.category === "main") {
-      if (
-        ["squat", "hinge", "horizontal_press", "vertical_press"].includes(
-          exercise.movementPattern
-        )
-      ) {
-        return 240;
-      }
-      return 180;
+function pickBestExercise(params: {
+  candidates: Exercise[];
+  selected: Exercise[];
+  bodyPart: BodyPart;
+  goal: Goal;
+  style: WorkoutStyle;
+  emphasis?: MuscleEmphasis | "";
+  equipmentAccess: EquipmentAccess;
+  usedIds: Set<string>;
+  slot: SessionSlot;
+  slotIndex: number;
+  variationIndex: number;
+  allowSameMovement?: boolean;
+}) {
+  const {
+    candidates,
+    selected,
+    bodyPart,
+    goal,
+    style,
+    emphasis,
+    equipmentAccess,
+    usedIds,
+    slot,
+    slotIndex,
+    variationIndex,
+    allowSameMovement = false,
+  } = params;
+
+  const usedPatterns = selected.map((exercise) => exercise.movementPattern);
+
+  const filtered = candidates.filter((exercise) => {
+    if (usedIds.has(exercise.id)) return false;
+    if (!allowSameMovement && usedPatterns.includes(exercise.movementPattern) && bodyPart !== "legs") {
+      return false;
     }
-    if (exercise.category === "accessory") return 105;
-    return 75;
-  }
+    return true;
+  });
 
-  if (style === "strength_size") {
-    if (exercise.category === "main") return 150;
-    if (exercise.category === "accessory") return 90;
-    return 60;
-  }
+  const pool = filtered.length
+    ? filtered
+    : candidates.filter((exercise) => !usedIds.has(exercise.id));
 
-  if (style === "old_school_mass") {
-    if (exercise.category === "main") return 135;
-    if (exercise.category === "accessory") return 90;
-    return 60;
-  }
+  if (!pool.length) return null;
 
-  if (style === "bodybuilding") {
-    if (exercise.category === "main") return 120;
-    if (exercise.category === "accessory") return 75;
-    return 60;
-  }
+  const scored = rotateArray(pool, variationIndex + slotIndex).map((exercise) => {
+    let score = 0;
+    score += scoreExerciseForStyle(exercise, style);
+    score += scoreExerciseForGoal(exercise, goal);
+    score += scoreExerciseForEmphasis(exercise, emphasis);
+    score += scoreExerciseForEquipment(exercise, equipmentAccess);
+    score += scoreExerciseForStructure(exercise, selected, slot, bodyPart);
+    score += scoreExerciseForVariation(exercise, slotIndex, variationIndex);
 
+    if (slot === "anchor" && inferLiftRole(exercise) === "anchor") score += 8;
+
+    return { exercise, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+
+  const bestScore = scored[0]?.score ?? 0;
+  const topPool = scored
+    .filter((item) => item.score >= bestScore - 2)
+    .map((item) => item.exercise);
+
+  return rotateArray(topPool, variationIndex + slotIndex)[0] ?? topPool[0] ?? null;
+}
+
+function attachFinisherNotes(style: WorkoutStyle) {
+  if (style === "bodybuilding") return "Final set can be pushed very hard if form stays clean.";
   if (style === "high_volume") {
-    if (exercise.category === "main") return 105;
-    if (exercise.category === "accessory") return 75;
-    return 45;
+    return "Final isolation movement can use a dropset if recovery is good.";
   }
-
-  if (style === "pump") {
-    if (exercise.category === "main") return 75;
-    if (exercise.category === "accessory") return 60;
-    return 45;
-  }
-
-  if (style === "intensity") {
-    if (exercise.category === "main") return 120;
-    if (exercise.category === "accessory") return 75;
-    return 60;
-  }
-
-  if (exercise.category === "main") return 105;
-  if (exercise.category === "accessory") return 75;
-  return 60;
+  if (style === "intensity") return "Final set can use rest-pause if technique stays sharp.";
+  if (style === "pump") return "Short rests and a hard final squeeze are encouraged.";
+  if (style === "old_school_mass") return "Push the final hard set with controlled aggression.";
+  return null;
 }
 
 function buildExerciseCoachingNote(
   exercise: Exercise,
   goal: Goal,
   style: WorkoutStyle,
-  slot: TemplateSlot
+  slot: SessionSlot
 ) {
   if (slot === "finisher") {
-    return "Finisher work. Push hard, chase tension, and finish the session with intent.";
+    return "Finisher work. Push hard, stay controlled, and end the session with intent.";
+  }
+
+  if (slot === "anchor" || inferLiftRole(exercise) === "anchor") {
+    if (goal === "strength") {
+      return "Anchor lift. Prioritize setup, bracing, crisp reps, and clean force output.";
+    }
+    return "Anchor lift. This is the main driver of the session, so own your setup and execution.";
+  }
+
+  if (slot === "unilateral") {
+    return "Single-side work. Stay controlled, own position, and make both sides earn the reps.";
   }
 
   if (exercise.category === "main") {
-    if (goal === "strength") {
-      return "Main lift. Prioritize crisp reps, strong setup, and force output.";
-    }
-    if (style === "bodybuilding" || style === "high_volume") {
-      return "Main movement. Push performance, but keep every rep controlled and repeatable.";
-    }
-    return "Main movement. Own your setup and execute clean working sets.";
+    return "Primary movement. Push performance while keeping reps clean and repeatable.";
   }
 
   if (exercise.category === "accessory") {
     return "Accessory work. Controlled reps, full range, and honest effort.";
   }
 
-  return "Isolation work. Keep tension on the target muscle and avoid ego loading.";
+  if (style === "pump") {
+    return "Isolation work. Keep constant tension and avoid rushing the set.";
+  }
+
+  return "Isolation work. Keep tension on the target muscle and avoid sloppy loading.";
 }
 
 function buildExerciseReason(
   exercise: Exercise,
-  bodyPart: BodyPart,
-  slot: TemplateSlot,
+  identity: WorkoutIdentity,
+  slot: SessionSlot,
   emphasis?: MuscleEmphasis | ""
 ) {
-  if (
-    slot === "primary_press" ||
-    slot === "back_row_primary" ||
-    slot === "legs_main_knee" ||
-    slot === "legs_main_hinge" ||
-    slot === "shoulder_press"
-  ) {
-    return "Included as a primary anchor movement to drive the session.";
+  if (slot === "anchor") {
+    return `Included as the anchor movement for your ${identity}.`;
+  }
+
+  if (slot === "unilateral") {
+    return "Included to add variation, improve control, and create productive single-side work.";
   }
 
   if (slot === "finisher") {
@@ -1085,77 +1184,10 @@ function buildExerciseReason(
   }
 
   if (exercise.category === "isolation") {
-    return "Included for targeted isolation volume and a stronger hypertrophy stimulus.";
+    return "Included for targeted volume and cleaner fatigue management.";
   }
 
-  return `Included to round out your ${toTitleCase(bodyPart)} session with better movement balance.`;
-}
-
-function buildCoachNote(params: {
-  goal: Goal;
-  bodyPart: BodyPart;
-  experienceLevel: ExperienceLevel;
-  duration: number;
-  equipmentAccess: EquipmentAccess;
-  style: WorkoutStyle;
-  volumeTier: VolumeTier;
-  emphasis?: MuscleEmphasis | "";
-  totalWorkingSets: number;
-}) {
-  const {
-    goal,
-    bodyPart,
-    experienceLevel,
-    duration,
-    equipmentAccess,
-    style,
-    volumeTier,
-    emphasis,
-    totalWorkingSets,
-  } = params;
-
-  const styleText =
-    style === "bodybuilding"
-      ? "This session is built with a bodybuilding bias: strong compounds, stable accessories, and targeted pump work."
-      : style === "high_volume"
-      ? "This session is built to push a lot of productive hypertrophy volume."
-      : style === "old_school_mass"
-      ? "This session leans into a heavier old-school mass-building feel."
-      : style === "pump"
-      ? "This session is built to chase tension, short rests, and a big pump."
-      : style === "strength_size"
-      ? "This session blends heavier loading with enough volume to grow."
-      : style === "intensity"
-      ? "This session is built around hard work, lower fluff, and strong effort."
-      : "This session balances quality compounds, useful accessories, and recoverable volume.";
-
-  const focus = ` Focus is ${toTitleCase(bodyPart)} with ${totalWorkingSets} working sets across roughly ${duration} minutes using ${toTitleCase(
-    equipmentAccess
-  ).toLowerCase()}.`;
-
-  const level = ` Programming is scaled for a ${experienceLevel} lifter.`;
-
-  const goalNote =
-    goal === "strength"
-      ? " Main lifts should stay crisp and powerful."
-      : goal === "hypertrophy"
-      ? " Keep tension high and execution clean."
-      : goal === "fat_loss"
-      ? " Keep the pace honest without sacrificing lifting quality."
-      : " Aim for clean progression and consistency.";
-
-  const emphasisNote = emphasis
-    ? ` Extra selection bias was applied toward ${toTitleCase(emphasis)}.`
-    : "";
-
-  const volumeNote =
-    volumeTier === "brutal"
-      ? " This is a high-demand session, so do not waste effort on junk reps."
-      : volumeTier === "high"
-      ? " Expect a fuller session with meaningful volume."
-      : "";
-
-  return `${styleText}${focus}${level}${goalNote}${emphasisNote}${volumeNote}`;
+  return `Included to support the structure of your ${identity}.`;
 }
 
 function buildProgressionAdvice(
@@ -1171,7 +1203,9 @@ function buildProgressionAdvice(
   ];
 
   if (goal === "strength") {
-    advice.push("On primary compounds, rest fully and earn load jumps instead of grinding every set.");
+    advice.push(
+      "On anchor lifts, rest fully and earn load jumps instead of grinding every set."
+    );
   } else if (style === "bodybuilding" || style === "high_volume") {
     advice.push("Use controlled eccentrics and keep tension high instead of rushing reps.");
   } else if (style === "pump") {
@@ -1180,12 +1214,16 @@ function buildProgressionAdvice(
     advice.push("Prioritize repeatable execution and steady progression over aggressive jumps.");
   }
 
-  if (bodyPart === "legs" && totalWorkingSets >= 20) {
-    advice.push("On high-volume leg days, protect your first main lift so the later work still has quality.");
+  if (bodyPart === "legs" && totalWorkingSets >= 18) {
+    advice.push(
+      "On high-volume lower days, protect your first big movement so later work still has quality."
+    );
   }
 
   if (bodyPart === "shoulders" || bodyPart === "arms") {
-    advice.push("For smaller-muscle lifts, smaller jumps and extra reps usually beat forcing heavy increases.");
+    advice.push(
+      "For smaller-muscle lifts, smaller jumps and extra reps usually beat forcing heavy increases."
+    );
   }
 
   return advice;
@@ -1213,85 +1251,10 @@ function getEstimatedDurationFromSets(
   return Math.max(fallbackDuration, computed);
 }
 
-function pickBestExercise(params: {
-  candidates: Exercise[];
-  selected: Exercise[];
-  style: WorkoutStyle;
-  goal: Goal;
-  emphasis?: MuscleEmphasis | "";
-  usedIds: Set<string>;
-  bodyPart: BodyPart;
-  allowSameMovement?: boolean;
-  variationIndex?: number;
-}) {
-  const {
-    candidates,
-    selected,
-    style,
-    goal,
-    emphasis,
-    usedIds,
-    bodyPart,
-    allowSameMovement = false,
-    variationIndex = 0,
-  } = params;
-
-  const usedPatterns = selected.map((exercise) => exercise.movementPattern);
-
-  const available = candidates.filter((exercise) => {
-    if (usedIds.has(exercise.id)) return false;
-    if (!allowSameMovement && usedPatterns.includes(exercise.movementPattern) && bodyPart !== "legs") {
-      return false;
-    }
-    return true;
-  });
-
-  const pool = available.length
-    ? available
-    : candidates.filter((exercise) => !usedIds.has(exercise.id));
-
-  if (!pool.length) return null;
-
-  const rotatedPool = rotateArray(pool, variationIndex);
-
-  const scored = rotatedPool.map((exercise, index) => {
-    let score = 0;
-    score += scoreExerciseForStyle(exercise, style);
-    score += scoreExerciseForGoal(exercise, goal);
-    score += scoreExerciseForEmphasis(exercise, emphasis);
-    score += scoreExerciseForStructure(exercise, selected, bodyPart);
-
-    if (index < 3) score += 2;
-    else if (index < 6) score += 1;
-
-    return { exercise, score };
-  });
-
-  scored.sort((a, b) => b.score - a.score);
-
-  const topScore = scored[0]?.score ?? 0;
-  const topPool = scored
-    .filter((item) => item.score >= topScore - 2)
-    .map((item) => item.exercise);
-
-  const rotatedTopPool = rotateArray(topPool, variationIndex);
-
-  return rotatedTopPool[0] ?? sampleOne(topPool);
-}
-
-function attachFinisherNotes(style: WorkoutStyle) {
-  if (style === "bodybuilding") return "Final set can be taken very close to failure.";
-  if (style === "high_volume") return "Final isolation movement can use a dropset if recovery is good.";
-  if (style === "intensity") return "Final set can use rest-pause if form stays clean.";
-  if (style === "pump") return "Short rests and a hard final squeeze are encouraged.";
-  if (style === "old_school_mass") return "Push the final hard set with controlled aggression.";
-  return null;
-}
-
 function mergeDuplicateSelections(
-  selected: Array<{ exercise: Exercise; slot: TemplateSlot; setCount: number }>
+  selected: Array<{ exercise: Exercise; slot: SessionSlot; setCount: number }>
 ) {
-  const merged: Array<{ exercise: Exercise; slot: TemplateSlot; setCount: number }> = [];
+  const merged: Array<{ exercise: Exercise; slot: SessionSlot; setCount: number }> = [];
 
   selected.forEach((item) => {
     const existing = merged.find((entry) => entry.exercise.id === item.exercise.id);
@@ -1305,75 +1268,184 @@ function mergeDuplicateSelections(
   return merged;
 }
 
+function buildWorkoutTitle(
+  identity: WorkoutIdentity,
+  volumeTier: VolumeTier
+) {
+  const intensitySuffix =
+    volumeTier === "brutal"
+      ? " • Hard"
+      : volumeTier === "high"
+      ? " • Challenging"
+      : " • Standard";
+
+  return `${identity}${intensitySuffix}`;
+}
+
+function buildCoachNote(params: {
+  plan: SessionPlan;
+  goal: Goal;
+  bodyPart: BodyPart;
+  experienceLevel: ExperienceLevel;
+  duration: number;
+  equipmentAccess: EquipmentAccess;
+  style: WorkoutStyle;
+  volumeTier: VolumeTier;
+  emphasis?: MuscleEmphasis | "";
+  totalWorkingSets: number;
+}) {
+  const {
+    plan,
+    goal,
+    experienceLevel,
+    duration,
+    equipmentAccess,
+    volumeTier,
+    emphasis,
+    totalWorkingSets,
+  } = params;
+
+  const sessionDemand =
+    volumeTier === "brutal"
+      ? "This is one of your more demanding sessions."
+      : volumeTier === "high"
+      ? "This is a fuller training session with more total work."
+      : "This session is built to be productive without adding unnecessary fatigue.";
+
+  const goalLine =
+    goal === "strength"
+      ? "The workout is structured to keep your main movements strong, clean, and progressive."
+      : goal === "hypertrophy"
+      ? "The workout is structured to give you enough quality volume to build muscle and improve exercise performance."
+      : goal === "fat_loss"
+      ? "The workout is structured to keep effort high, training efficient, and movement quality strong."
+      : "The workout is structured to improve overall fitness, consistency, and balanced training.";
+
+  const identityLine = `Today’s session is ${plan.identity.toLowerCase()}, with ${totalWorkingSets} working sets and an estimated duration of about ${duration} minutes.`;
+
+  const equipmentLine = `Exercise selection is matched to ${toTitleCase(
+    equipmentAccess
+  ).toLowerCase()} and scaled for a ${experienceLevel} lifter.`;
+
+  const emphasisLine = emphasis
+    ? ` Extra exercise bias was applied toward ${toTitleCase(emphasis).toLowerCase()}.`
+    : "";
+
+  const unilateralLine =
+    plan.unilateralTarget === 2
+      ? " This workout intentionally includes more single-side work for balance, control, and variation."
+      : plan.unilateralTarget === 1
+      ? " This workout may include a small amount of single-side work for balance and variation."
+      : "";
+
+  return `${sessionDemand} ${goalLine} ${identityLine} ${equipmentLine}${emphasisLine}${unilateralLine}`;
+}
+
+function fallbackCandidatesForSlot(
+  slot: SessionSlot,
+  pool: Exercise[],
+  plan: SessionPlan
+) {
+  if (slot === "anchor") {
+    return pool.filter(
+      (exercise) =>
+        matchesAnyFocus(exercise, plan.focuses) &&
+        (exercise.category === "main" || inferLiftRole(exercise) === "anchor")
+    );
+  }
+
+  if (slot === "unilateral") {
+    return pool.filter((exercise) => exercise.laterality === "unilateral");
+  }
+
+  if (slot === "core") {
+    return pool.filter((exercise) => exercise.primaryMuscle === "core");
+  }
+
+  return pool.filter((exercise) => matchesAnyFocus(exercise, plan.focuses));
+}
+
 export function generateWorkout({
   bodyPart,
   goal,
-  duration,
+  duration = 60,
   experienceLevel,
   equipmentAccess,
-  style = "bodybuilding",
+  style = "balanced",
   volumeTier = "high",
   emphasis = "",
   variationIndex = 0,
 }: GenerateWorkoutInput): GeneratedWorkout {
-  const pool = getPoolForBodyPart(bodyPart).filter((exercise) =>
-    isExerciseValidForUser(exercise, equipmentAccess, experienceLevel)
+  const pool = uniqueById(
+    getCandidatePool(bodyPart, equipmentAccess, experienceLevel)
   );
 
-  const template = getTemplate(bodyPart, volumeTier, emphasis);
-  const selected: Array<{ exercise: Exercise; slot: TemplateSlot; setCount: number }> = [];
-  const usedIds = new Set<string>();
+  const plan = chooseIdentity({
+    bodyPart,
+    goal,
+    duration,
+    equipmentAccess,
+    emphasis,
+    variationIndex,
+  });
 
-  template.forEach((slotDef, slotIndex) => {
-    const selector = buildSlotSelector(slotDef.slot, bodyPart);
-    const candidates = pool.filter(selector);
+  const selected: Array<{ exercise: Exercise; slot: SessionSlot; setCount: number }> = [];
+  const usedIds = new Set<string>();
+  let unilateralCount = 0;
+
+  plan.slots.forEach((slotDef, slotIndex) => {
+    const rawCandidates = getSlotCandidates(slotDef.slot, pool, plan);
+
+    const filteredForUnilateral =
+      slotDef.slot !== "unilateral" && unilateralCount >= plan.unilateralTarget
+        ? rawCandidates.filter((exercise) => exercise.laterality !== "unilateral")
+        : rawCandidates;
 
     const allowSameMovement = [
-      "side_delt",
-      "rear_delt",
-      "biceps_secondary",
-      "triceps_secondary",
+      "side_delt_iso",
+      "rear_delt_iso",
+      "biceps_iso",
+      "triceps_iso",
       "finisher",
-      "legs_secondary_knee",
-      "legs_unilateral",
+      "calves",
+      "core",
     ].includes(slotDef.slot);
 
-    const chosen = pickBestExercise({
-      candidates,
+    let chosen = pickBestExercise({
+      candidates: filteredForUnilateral,
       selected: selected.map((item) => item.exercise),
-      style,
-      goal,
-      emphasis,
-      usedIds,
       bodyPart,
+      goal,
+      style,
+      emphasis,
+      equipmentAccess,
+      usedIds,
+      slot: slotDef.slot,
+      slotIndex,
+      variationIndex,
       allowSameMovement,
-      variationIndex: variationIndex + slotIndex,
     });
 
     if (!chosen) {
-      if (!slotDef.optional) {
-        const fallbackCandidates = pool.filter((exercise) => !usedIds.has(exercise.id));
-        const fallback = pickBestExercise({
-          candidates: fallbackCandidates,
-          selected: selected.map((item) => item.exercise),
-          style,
-          goal,
-          emphasis,
-          usedIds,
-          bodyPart,
-          allowSameMovement: true,
-          variationIndex: variationIndex + slotIndex,
-        });
+      const fallback = fallbackCandidatesForSlot(slotDef.slot, pool, plan);
+      chosen = pickBestExercise({
+        candidates: fallback,
+        selected: selected.map((item) => item.exercise),
+        bodyPart,
+        goal,
+        style,
+        emphasis,
+        equipmentAccess,
+        usedIds,
+        slot: slotDef.slot,
+        slotIndex,
+        variationIndex,
+        allowSameMovement: true,
+      });
+    }
 
-        if (fallback) {
-          selected.push({
-            exercise: fallback,
-            slot: slotDef.slot,
-            setCount: slotDef.sets,
-          });
-          usedIds.add(fallback.id);
-        }
-      }
+    if (!chosen) {
+      if (!slotDef.optional) return;
       return;
     }
 
@@ -1383,15 +1455,17 @@ export function generateWorkout({
       setCount: slotDef.sets,
     });
     usedIds.add(chosen.id);
+
+    if (chosen.laterality === "unilateral") unilateralCount += 1;
   });
 
   if (selected.length < 4) {
-    const fallback = rotateArray(
-      shuffleArray(pool).filter((exercise) => !usedIds.has(exercise.id)),
+    const extra = rotateArray(
+      pool.filter((exercise) => !usedIds.has(exercise.id)),
       variationIndex
     ).slice(0, 3);
 
-    fallback.forEach((exercise) => {
+    extra.forEach((exercise) => {
       selected.push({
         exercise,
         slot: "finisher",
@@ -1416,7 +1490,7 @@ export function generateWorkout({
       body_part: getDisplayBodyPart(item.exercise, bodyPart),
       sets: buildSets(item.setCount, repRange),
       coachingNote: buildExerciseCoachingNote(item.exercise, goal, style, item.slot),
-      reason: buildExerciseReason(item.exercise, bodyPart, item.slot, emphasis),
+      reason: buildExerciseReason(item.exercise, plan.identity, item.slot, emphasis),
       restSeconds: getRestSeconds(goal, style, item.exercise),
       targetWeight: null,
       repRange,
@@ -1429,6 +1503,7 @@ export function generateWorkout({
     (sum, exercise) => sum + exercise.sets.length,
     0
   );
+
   const estimatedDuration = getEstimatedDurationFromSets(
     totalWorkingSets,
     style,
@@ -1436,13 +1511,14 @@ export function generateWorkout({
   );
 
   return {
-    workout_name: getWorkoutTitle(bodyPart, style, volumeTier, emphasis),
+    workout_name: buildWorkoutTitle(plan.identity, volumeTier),
     body_part: bodyPart,
     estimated_duration: estimatedDuration,
     totalWorkingSets,
     workoutStyle: STYLE_LABELS[style],
     emphasis,
     coachNote: buildCoachNote({
+      plan,
       goal,
       bodyPart,
       experienceLevel,
