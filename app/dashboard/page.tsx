@@ -3,11 +3,22 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { buildDashboardCoachData } from "@/lib/coach/dashboard";
+import type { UserFacingCoachSummary } from "@/lib/coach/types";
 
 type Profile = {
   id?: number;
   user_id?: string | null;
   name: string | null;
+  age?: number | null;
+  sex?: string | null;
+  height?: string | null;
+  bodyweight?: string | null;
+  waist?: string | null;
+  goal?: string | null;
+  focus?: string | null;
+  experience_level?: string | null;
+  equipment_access?: string | null;
 };
 
 type Workout = {
@@ -29,6 +40,7 @@ type WorkoutSet = {
   weight: string | null;
   reps: string | null;
   body_part?: string | null;
+  completed?: boolean | null;
   created_at: string;
 };
 
@@ -61,6 +73,7 @@ export default function DashboardPage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [sets, setSets] = useState<WorkoutSet[]>([]);
+  const [coachData, setCoachData] = useState<UserFacingCoachSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("");
 
@@ -96,7 +109,9 @@ export default function DashboardPage() {
     ] = await Promise.all([
       supabase
         .from("profiles")
-        .select("id, user_id, name")
+        .select(
+          "id, user_id, name, age, sex, height, bodyweight, waist, goal, focus, experience_level, equipment_access"
+        )
         .eq("user_id", user.id)
         .maybeSingle(),
       supabase
@@ -115,9 +130,23 @@ export default function DashboardPage() {
     if (workoutsError) console.error("Workouts load error:", workoutsError);
     if (setsError) console.error("Sets load error:", setsError);
 
-    setProfile((profileData as Profile) ?? null);
-    setWorkouts((workoutsData as Workout[]) ?? []);
-    setSets((setsData as WorkoutSet[]) ?? []);
+    const nextProfile = (profileData as Profile) ?? null;
+    const nextWorkouts = (workoutsData as Workout[]) ?? [];
+    const nextSets = (setsData as WorkoutSet[]) ?? [];
+
+    setProfile(nextProfile);
+    setWorkouts(nextWorkouts);
+    setSets(nextSets);
+
+    const dashboardCoachData = buildDashboardCoachData({
+      userId: user.id,
+      profile: nextProfile,
+      workouts: nextWorkouts,
+      workoutSets: nextSets,
+    });
+
+    setCoachData(dashboardCoachData.coach);
+
     setStatus("");
     setLoading(false);
   }
@@ -154,6 +183,48 @@ export default function DashboardPage() {
     return value
       .replaceAll("_", " ")
       .replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+
+  function formatBodyPartLabel(value: string) {
+    switch (value) {
+      case "full_body":
+        return "Full Body";
+      case "upper":
+        return "Upper Body";
+      case "lower":
+        return "Lower Body";
+      case "push":
+        return "Push";
+      case "pull":
+        return "Pull";
+      case "legs":
+        return "Legs";
+      case "back":
+        return "Back";
+      case "chest":
+        return "Chest";
+      case "shoulders":
+        return "Shoulders";
+      case "arms":
+        return "Arms";
+      default:
+        return "Training";
+    }
+  }
+
+  function formatStyleLabel(value: string) {
+    switch (value) {
+      case "hypertrophy":
+        return "Hypertrophy";
+      case "strength":
+        return "Strength";
+      case "recovery":
+        return "Recovery";
+      case "reentry":
+        return "Re-entry";
+      default:
+        return "Workout";
+    }
   }
 
   const today = startOfDay(new Date());
@@ -594,52 +665,32 @@ export default function DashboardPage() {
     return "Your body-part distribution looks pretty balanced right now. Keep stacking quality sessions.";
   }, [bodyPartSummary]);
 
-  const coachSummary = useMemo(() => {
-    if (completedSets.length === 0) {
-      return "Start logging complete workouts and your AI coach will begin learning your patterns, best lifts, and progression trends.";
-    }
+  const coachSummaryText =
+    coachData?.recovery.message ??
+    "Log a few workouts and ReSpawn will start generating smarter coaching.";
 
-    if (currentStreak >= 4 && volumeMomentum.deltaPct >= 0) {
-      return `You are building real momentum. Your ${currentStreak}-day streak is alive and your recent training load is holding steady.`;
-    }
+  const coachRecommendationText = coachData
+    ? `${formatBodyPartLabel(coachData.recommendation.recommendedBodyPart)} · ${formatStyleLabel(
+        coachData.recommendation.recommendedStyle
+      )}`
+    : "Full Body · Re-entry";
 
-    if (daysSinceLastWorkout !== null && daysSinceLastWorkout >= 3) {
-      return `It has been ${daysSinceLastWorkout} days since your last workout. A solid session today gets your trend moving again.`;
-    }
-
-    if (volumeMomentum.deltaPct >= 10) {
-      return `Your volume is up ${volumeMomentum.deltaPct}% versus the previous 7 days. Keep pushing, but stay clean on recovery.`;
-    }
-
-    if (volumeMomentum.deltaPct <= -15) {
-      return `Training volume is down ${Math.abs(volumeMomentum.deltaPct)}% versus the previous week. Good time to re-establish rhythm.`;
-    }
-
-    return "Your training data looks stable. Keep progressing one main lift and one consistency goal at a time.";
-  }, [completedSets.length, currentStreak, daysSinceLastWorkout, volumeMomentum.deltaPct]);
-
-  const coachRecommendation = useMemo(() => {
-    if (completedSets.length === 0) {
-      return "Do a simple full-body workout and log every set. The more complete your logs, the smarter your coach gets.";
-    }
-
-    if (daysSinceLastWorkout === null || daysSinceLastWorkout >= 3) {
-      return "Train today. Priority is getting back into rhythm and building a strong week.";
-    }
-
-    if (currentStreak >= 3 && volumeMomentum.deltaPct >= 0) {
-      return "Momentum is good. Push one primary movement today and try to beat your last top set by reps, weight, or cleaner execution.";
-    }
-
-    if (volumeMomentum.deltaPct <= -15) {
-      return "Use today to rebuild output. Get quality volume in without overthinking it.";
-    }
-
-    return "Train normally today. Focus on a strong first lift and keep the accessories sharp.";
-  }, [completedSets.length, currentStreak, daysSinceLastWorkout, volumeMomentum.deltaPct]);
+  const coachReasonText =
+    coachData?.recommendation.reason ??
+    "Start logging complete workouts so your coach can learn your training patterns.";
 
   const coachFeed = useMemo<CoachFeedItem[]>(() => {
     const items: CoachFeedItem[] = [];
+
+    if (coachData?.highlights?.length) {
+      for (const highlight of coachData.highlights.slice(0, 2)) {
+        items.push({
+          title: "AI Coach",
+          detail: highlight,
+          tone: "good",
+        });
+      }
+    }
 
     if (currentStreak >= 3) {
       items.push({
@@ -680,7 +731,7 @@ export default function DashboardPage() {
     }
 
     return items.slice(0, 4);
-  }, [currentStreak, volumeMomentum.deltaPct, repBias, bodyPartSummary]);
+  }, [coachData, currentStreak, volumeMomentum.deltaPct, repBias, bodyPartSummary]);
 
   const heatmapDays = useMemo(() => {
     const arr: { label: string; active: boolean; intense: boolean }[] = [];
@@ -723,7 +774,7 @@ export default function DashboardPage() {
           <div>
             <p style={eyebrowStyle}>RESPAWN AI COACH</p>
             <h1 style={heroTitleStyle}>{displayName}&apos;s AI Coach</h1>
-            <p style={heroSubStyle}>{coachSummary}</p>
+            <p style={heroSubStyle}>{coachSummaryText}</p>
           </div>
 
           <button onClick={handleSignOut} style={ghostButtonStyle}>
@@ -733,7 +784,8 @@ export default function DashboardPage() {
 
         <div style={coachCalloutStyle}>
           <div style={coachCalloutLabelStyle}>Coach recommendation</div>
-          <div style={coachCalloutTextStyle}>{coachRecommendation}</div>
+          <div style={coachCalloutTextStyle}>{coachRecommendationText}</div>
+          <div style={coachCalloutReasonStyle}>{coachReasonText}</div>
         </div>
 
         <div style={heroStatsRowStyle}>
@@ -772,7 +824,8 @@ export default function DashboardPage() {
             <h2 style={sectionTitle}>AI Coach Insight</h2>
           </div>
 
-          <div style={featureTextStyle}>{coachRecommendation}</div>
+          <div style={featureTextStyle}>{coachRecommendationText}</div>
+          <div style={featureSupportTextStyle}>{coachReasonText}</div>
 
           <div style={chipRowStyle}>
             <span style={metricChipStyle}>Best streak: {bestStreak}d</span>
@@ -785,11 +838,25 @@ export default function DashboardPage() {
             <span style={metricChipStyle}>
               Style: {repBias === "Not enough data" ? "Learning" : repBias}
             </span>
+
+            {coachData ? (
+              <span style={metricChipStyle}>
+                Momentum: {titleCase(coachData.momentumLabel)}
+              </span>
+            ) : null}
+
+            {coachData ? (
+              <span style={metricChipStyle}>
+                Consistency: {titleCase(coachData.consistencyLabel)}
+              </span>
+            ) : null}
           </div>
 
           <div style={subFeatureBoxStyle}>
             <div style={subFeatureLabelStyle}>Next focus</div>
-            <div style={subFeatureTextStyle}>{nextFocus}</div>
+            <div style={subFeatureTextStyle}>
+              {coachData?.highlights?.[0] ?? nextFocus}
+            </div>
           </div>
         </section>
 
@@ -1078,6 +1145,13 @@ const coachCalloutTextStyle: CSSProperties = {
   lineHeight: 1.45,
 };
 
+const coachCalloutReasonStyle: CSSProperties = {
+  color: "#cfcfcf",
+  fontSize: "14px",
+  lineHeight: 1.45,
+  marginTop: "8px",
+};
+
 const heroStatsRowStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
@@ -1161,6 +1235,14 @@ const featureTextStyle: CSSProperties = {
   fontSize: "24px",
   lineHeight: 1.3,
   fontWeight: 800,
+};
+
+const featureSupportTextStyle: CSSProperties = {
+  color: "#cfcfcf",
+  fontSize: "14px",
+  lineHeight: 1.5,
+  marginTop: "10px",
+  fontWeight: 600,
 };
 
 const chipRowStyle: CSSProperties = {
