@@ -113,8 +113,7 @@ export default function TodayPage() {
         <h1 style={heroTitleStyle}>Smarter Workouts. Real Progress.</h1>
         <p style={heroSubStyle}>
           ReSpawn helps you build better workouts using AI and your training
-          history — designed around your goals, experience, equipment, and
-          long-term progress.
+          history.
         </p>
       </section>
 
@@ -124,12 +123,12 @@ export default function TodayPage() {
         </div>
 
         <p style={sectionSubStyle}>
-          Create a workout built for real progress.
+          Generate a smart workout built for real progress.
         </p>
 
         <p style={bodyCopyStyle}>
-          Use AI to generate a personalized workout based on your goal, training
-          background, available equipment, and recent workout history.
+          Use ReSpawn AI to generate a personalized workout Once generated, 
+          the workout is sent directly to your Session Page, where you can.
         </p>
 
         <div style={featureListStyle}>
@@ -147,7 +146,7 @@ export default function TodayPage() {
           </div>
           <div style={featureItemStyle}>
             <div style={featureBulletStyle} />
-            <span>Customize the session to fit your day</span>
+            <span>Customize the session to fit your needs</span>
           </div>
         </div>
 

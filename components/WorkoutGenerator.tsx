@@ -538,18 +538,16 @@ export default function WorkoutGenerator() {
 
       <section style={cardStyle}>
         <div style={sectionHeaderStyle}>
-          <h2 style={sectionTitle}>How Respawn Builds Your Workout</h2>
+          <h2 style={sectionTitle}>Tell ReSpawn what you want to train</h2>
         </div>
 
         <div style={explanationBlockStyle}>
           <p style={explanationTextStyle}>
-            Respawn now chooses the workout identity for you based on your goal,
-            training focus, experience level, and equipment access.
+            You choose the goal, body part, experience level, and equipment.
           </p>
           <p style={explanationTextStyle}>
-            Instead of forcing you to configure extra settings, Respawn handles the
-            workout structure internally and builds a session that makes more sense for
-            the day.
+            InstInstead of forcing you to configure complicated settings, 
+            ReSpawn automatically chooses the right workout identity and structure for the session.
           </p>
           <p style={explanationTextStyle}>
             That means your workouts should feel more intentional, more balanced, and

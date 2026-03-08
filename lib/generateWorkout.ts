@@ -1390,7 +1390,7 @@ function buildProgressionAdvice(
   totalWorkingSets: number
 ) {
   const advice = [
-    "Stay inside the target rep range before forcing load increases.",
+    "Stay inside the target rep range before adding load increases.",
     "Beat last time with cleaner reps or an extra rep before chasing more weight.",
     "When all working sets reach the top of the rep range with strong form, increase load next time.",
   ];
