@@ -51,6 +51,8 @@ type LiftInsightCard = {
   timesLogged: number;
   lastWeight: number;
   lastReps: number;
+  firstAvgE1RM: number;
+  secondAvgE1RM: number;
 };
 
 type StrengthCard = {
@@ -534,6 +536,8 @@ export default function DashboardPage() {
           timesLogged: sorted.length,
           lastWeight: toNumber(last?.weight),
           lastReps: toNumber(last?.reps),
+          firstAvgE1RM: Math.round(firstAvg),
+          secondAvgE1RM: Math.round(secondAvg),
         };
       })
       .filter((item) => item.timesLogged >= 3)
@@ -581,7 +585,7 @@ export default function DashboardPage() {
 
     if (heaviestWeight) {
       cards.push({
-        label: "Heaviest Set Logged",
+        label: "Heaviest Set",
         value: `${heaviestWeight.weight} lb`,
         sub: `${heaviestWeight.name} • ${heaviestWeight.reps} reps`,
       });
@@ -616,11 +620,46 @@ export default function DashboardPage() {
     };
   }, [bodyPartSummary]);
 
+  const strengthLeader = useMemo(() => {
+    return liftInsights[0] ?? null;
+  }, [liftInsights]);
+
+  const strengthWhy = useMemo(() => {
+    if (!strengthLeader) {
+      return {
+        headline: "Not enough repeated lift data yet",
+        detail:
+          "Repeat the same key lifts a few more times and ReSpawn will explain whether strength is moving up, flat, or down.",
+      };
+    }
+
+    const delta = strengthLeader.trendPct;
+
+    if (delta < 0) {
+      return {
+        headline: `${strengthLeader.name} is pulling your strength trend down`,
+        detail: `Your repeated-lift trend is ${delta}% on ${strengthLeader.name}. Early average estimated strength was ${strengthLeader.firstAvgE1RM}, and your more recent average is ${strengthLeader.secondAvgE1RM}. Your latest logged set was ${strengthLeader.lastWeight} × ${strengthLeader.lastReps}.`,
+      };
+    }
+
+    if (delta > 0) {
+      return {
+        headline: `${strengthLeader.name} is driving your strength trend up`,
+        detail: `Your repeated-lift trend is +${delta}% on ${strengthLeader.name}. Early average estimated strength was ${strengthLeader.firstAvgE1RM}, and your more recent average is ${strengthLeader.secondAvgE1RM}.`,
+      };
+    }
+
+    return {
+      headline: `${strengthLeader.name} is holding steady`,
+      detail: `Your repeated-lift trend is flat right now. Early average estimated strength was ${strengthLeader.firstAvgE1RM}, and your recent average is ${strengthLeader.secondAvgE1RM}.`,
+    };
+  }, [strengthLeader]);
+
   const aiHeadline = useMemo(() => {
-    if (completedSets.length === 0) return "Build your first real training signal";
+    if (completedSets.length === 0) return "Start building your training signal";
 
     if (daysSinceLastWorkout !== null && daysSinceLastWorkout >= 3) {
-      return "You’re due for a productive session";
+      return "You’re ready for a clean comeback session";
     }
 
     if (mostUndertrainedBodyPart && mostUndertrainedBodyPart.gap >= 6) {
@@ -628,46 +667,14 @@ export default function DashboardPage() {
     }
 
     if (currentStreak >= 3 && volumeMomentum.deltaPct >= 0) {
-      return "You’re building momentum";
+      return "Momentum is building";
     }
 
     if (volumeMomentum.deltaPct <= -15) {
-      return "Your output dipped a bit this week";
+      return "Your output dipped this week";
     }
 
-    return "Your training is stable right now";
-  }, [
-    completedSets.length,
-    daysSinceLastWorkout,
-    mostUndertrainedBodyPart,
-    currentStreak,
-    volumeMomentum.deltaPct,
-  ]);
-
-  const aiSummary = useMemo(() => {
-    if (completedSets.length === 0) {
-      return "Log a few complete workouts and ReSpawn will start reading your strength trends, consistency, and body-part balance automatically.";
-    }
-
-    if (daysSinceLastWorkout !== null && daysSinceLastWorkout >= 3) {
-      return "You’ve had enough time away from training that today should be about restarting rhythm, not overthinking the perfect session.";
-    }
-
-    if (mostUndertrainedBodyPart && mostUndertrainedBodyPart.gap >= 6) {
-      return `${mostUndertrainedBodyPart.lowest.bodyPart} is trailing ${mostUndertrainedBodyPart.highest.bodyPart} by ${mostUndertrainedBodyPart.gap} sets. A focused session there would rebalance your recent training.`;
-    }
-
-    if (currentStreak >= 3 && volumeMomentum.deltaPct >= 0) {
-      return "Recent consistency and volume are both moving in the right direction. Keep stacking quality sessions instead of chasing random changes.";
-    }
-
-    if (volumeMomentum.deltaPct <= -15) {
-      return `Your last 7 days are down ${Math.abs(
-        volumeMomentum.deltaPct
-      )}% versus the previous 7. One solid session gets momentum back fast.`;
-    }
-
-    return "You’re active, but the main opportunity now is to keep the next few workouts intentional and balanced.";
+    return "Your training is moving, but it needs clearer direction";
   }, [
     completedSets.length,
     daysSinceLastWorkout,
@@ -680,7 +687,8 @@ export default function DashboardPage() {
     if (completedSets.length === 0) {
       return {
         title: "Start your first session",
-        detail: "Once you log complete workouts, ReSpawn will recommend your next training target automatically.",
+        detail:
+          "Once you log full workouts, ReSpawn will start coaching your next target automatically.",
         cta: "Go To Today",
       };
     }
@@ -688,38 +696,39 @@ export default function DashboardPage() {
     if (daysSinceLastWorkout !== null && daysSinceLastWorkout >= 3) {
       return {
         title: "Train today",
-        detail: "You’ve had enough recovery time. A clean, simple session is the fastest way to rebuild momentum.",
+        detail: "You’ve had enough recovery time. Keep it simple and get momentum back.",
         cta: "Start Workout",
       };
     }
 
     if (mostUndertrainedBodyPart && mostUndertrainedBodyPart.gap >= 6) {
       return {
-        title: `Bring up ${mostUndertrainedBodyPart.lowest.bodyPart}`,
-        detail: `${mostUndertrainedBodyPart.lowest.bodyPart} is under-emphasized compared with ${mostUndertrainedBodyPart.highest.bodyPart}. ReSpawn should bias your next workout there.`,
-        cta: `Train ${mostUndertrainedBodyPart.lowest.bodyPart}`,
+        title: `Train ${mostUndertrainedBodyPart.lowest.bodyPart}`,
+        detail: `${mostUndertrainedBodyPart.lowest.bodyPart} is the clearest opportunity in your recent split.`,
+        cta: `Build ${mostUndertrainedBodyPart.lowest.bodyPart} Workout`,
       };
     }
 
     if (repBias === "Strength") {
       return {
-        title: "Keep building strength",
-        detail: "Your recent work leans heavier and lower rep. Stay focused on strong compounds and clean progression.",
+        title: "Stay on strength",
+        detail: "Your rep profile is heavier right now. Keep the main lifts clean and progressive.",
         cta: "Generate Next Session",
       };
     }
 
     if (repBias === "Hypertrophy") {
       return {
-        title: "Keep building size",
-        detail: "Your recent training is in the hypertrophy zone. Push quality volume and clean execution next session.",
+        title: "Keep pushing hypertrophy",
+        detail: "Your rep profile is in the muscle-building range. Stay focused on quality volume.",
         cta: "Generate Next Session",
       };
     }
 
     return {
       title: "Keep the plan moving",
-      detail: "Your training split looks reasonably balanced right now. The win is simply getting the next session done.",
+      detail:
+        "There’s no major issue to solve right now. The next session matters more than more tweaking.",
       cta: "Generate Next Session",
     };
   }, [completedSets.length, daysSinceLastWorkout, mostUndertrainedBodyPart, repBias]);
@@ -752,7 +761,7 @@ export default function DashboardPage() {
     if (strongestEstimatedLift) {
       items.push({
         title: "Top lift",
-        detail: `${strongestEstimatedLift.name} is currently your highest estimated strength expression at ${strongestEstimatedLift.e1rm}.`,
+        detail: `${strongestEstimatedLift.name} is currently your top estimated strength expression at ${strongestEstimatedLift.e1rm}.`,
         tone: "neutral",
       });
     }
@@ -760,20 +769,9 @@ export default function DashboardPage() {
     if (bodyPartSummary[0]) {
       items.push({
         title: "Most emphasized area",
-        detail: `${bodyPartSummary[0].bodyPart} currently leads your logged training volume.`,
+        detail: `${bodyPartSummary[0].bodyPart} is leading your recent logged volume.`,
         tone: "neutral",
       });
-    }
-
-    if (bodyPartSummary.length > 1) {
-      const lowest = [...bodyPartSummary].sort((a, b) => a.sets - b.sets)[0];
-      if (lowest) {
-        items.push({
-          title: "Opportunity",
-          detail: `${lowest.bodyPart} is your least-emphasized area right now.`,
-          tone: "neutral",
-        });
-      }
     }
 
     return items.slice(0, 4);
@@ -785,8 +783,8 @@ export default function DashboardPage() {
     bodyPartSummary,
   ]);
 
-  const heatmapDays = useMemo(() => {
-    const arr: { label: string; active: boolean; intense: boolean }[] = [];
+  const weeklyChartData = useMemo(() => {
+    const days: { label: string; volume: number; active: boolean }[] = [];
 
     for (let i = 6; i >= 0; i -= 1) {
       const day = new Date(today);
@@ -795,15 +793,50 @@ export default function DashboardPage() {
       const key = day.toISOString();
       const info = workoutDays.get(key);
 
-      arr.push({
-        label: day.toLocaleDateString(undefined, { weekday: "short" }).slice(0, 1),
+      days.push({
+        label: day.toLocaleDateString(undefined, { weekday: "short" }),
+        volume: info?.volume ?? 0,
         active: Boolean(info),
-        intense: (info?.volume ?? 0) >= 8000,
       });
     }
 
-    return arr;
+    return days;
   }, [today, workoutDays]);
+
+  const maxWeeklyVolume = useMemo(() => {
+    return Math.max(1, ...weeklyChartData.map((d) => d.volume));
+  }, [weeklyChartData]);
+
+  const bodyBalanceSegments = useMemo(() => {
+    const items = bodyPartSummary.slice(0, 5);
+    const total = items.reduce((sum, item) => sum + item.sets, 0) || 1;
+    const colors = ["#ff4d4d", "#ff8b8b", "#ffa94d", "#7c5cff", "#29cc7a"];
+
+    let currentAngle = 0;
+    const segments = items.map((item, index) => {
+      const pct = item.sets / total;
+      const start = currentAngle;
+      const end = currentAngle + pct * 360;
+      currentAngle = end;
+
+      return {
+        ...item,
+        color: colors[index % colors.length],
+        start,
+        end,
+        pct: Math.round(pct * 100),
+      };
+    });
+
+    const gradient = segments
+      .map((segment) => `${segment.color} ${segment.start}deg ${segment.end}deg`)
+      .join(", ");
+
+    return {
+      segments,
+      gradient: gradient || "#252525 0deg 360deg",
+    };
+  }, [bodyPartSummary]);
 
   const displayName = profile?.name?.trim() || "Your";
 
@@ -812,7 +845,7 @@ export default function DashboardPage() {
   };
 
   const secondaryAction = () => {
-    router.push("/Workout");
+    router.push("/Progress");
   };
 
   if (loading) {
@@ -821,7 +854,9 @@ export default function DashboardPage() {
         <section style={heroCardStyle}>
           <p style={eyebrowStyle}>RESPAWN DASHBOARD</p>
           <h1 style={heroTitleStyle}>Loading your AI coach...</h1>
-          <p style={heroSubStyle}>Pulling workouts, sets, strength trends, and training signals.</p>
+          <p style={heroSubStyle}>
+            Pulling your workouts, trends, balance, and next-step coaching.
+          </p>
         </section>
       </main>
     );
@@ -831,13 +866,43 @@ export default function DashboardPage() {
     <main style={pageStyle}>
       <section style={heroCardStyle}>
         <div style={heroTopRowStyle}>
-          <div>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <p style={eyebrowStyle}>RESPAWN DASHBOARD</p>
             <h1 style={heroTitleStyle}>{displayName}&apos;s AI Coach</h1>
             <p style={heroSubStyle}>
-              ReSpawn turns your recent workouts into a clear read on strength, consistency,
-              momentum, and what to train next.
+              A cleaner read on your recent training, what is improving, what is slipping,
+              and what to do next.
             </p>
+
+            <div style={heroCoachFeedWrapStyle}>
+              <div style={heroCoachFeedLabelStyle}>Coach Feed</div>
+
+              {coachFeed.length > 0 ? (
+                <div style={heroCoachFeedListStyle}>
+                  {coachFeed.slice(0, 3).map((item, index) => (
+                    <div
+                      key={`${item.title}-${index}`}
+                      style={{
+                        ...heroCoachFeedCardStyle,
+                        border:
+                          item.tone === "good"
+                            ? "1px solid rgba(40, 199, 111, 0.22)"
+                            : item.tone === "warn"
+                            ? "1px solid rgba(255, 184, 0, 0.22)"
+                            : "1px solid rgba(255,255,255,0.07)",
+                      }}
+                    >
+                      <div style={heroCoachFeedTitleStyle}>{item.title}</div>
+                      <div style={heroCoachFeedTextStyle}>{item.detail}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={heroCoachFeedEmptyStyle}>
+                  Keep logging workouts and your coach feed will start filling in here.
+                </div>
+              )}
+            </div>
           </div>
 
           <button onClick={handleSignOut} style={ghostButtonStyle}>
@@ -846,9 +911,9 @@ export default function DashboardPage() {
         </div>
 
         <div style={heroInsightCardStyle}>
-          <div style={heroInsightLabelStyle}>AI Coach Insight</div>
+          <div style={heroInsightLabelStyle}>Today&apos;s Coach Call</div>
           <div style={heroInsightTitleStyle}>{aiHeadline}</div>
-          <div style={heroInsightTextStyle}>{aiSummary}</div>
+          <div style={heroInsightTextStyle}>{nextTrainingTarget.detail}</div>
 
           <div style={heroActionRowStyle}>
             <button onClick={primaryAction} style={primaryButtonStyle}>
@@ -859,38 +924,118 @@ export default function DashboardPage() {
             </button>
           </div>
         </div>
-
-        <div style={heroStatsGridStyle}>
-          <div style={heroStatCardStyle}>
-            <span style={heroStatLabelStyle}>Current Streak</span>
-            <span style={heroStatValueStyle}>{currentStreak}d</span>
-          </div>
-
-          <div style={heroStatCardStyle}>
-            <span style={heroStatLabelStyle}>Workouts This Week</span>
-            <span style={heroStatValueStyle}>{workoutsThisWeek}</span>
-          </div>
-
-          <div style={heroStatCardStyle}>
-            <span style={heroStatLabelStyle}>Strength Trend</span>
-            <span style={heroStatValueStyle}>
-              {liftInsights[0]
-                ? `${liftInsights[0].trendPct >= 0 ? "+" : ""}${liftInsights[0].trendPct}%`
-                : "--"}
-            </span>
-          </div>
-
-          <div style={heroStatCardStyle}>
-            <span style={heroStatLabelStyle}>Volume vs Last Week</span>
-            <span style={heroStatValueStyle}>
-              {volumeMomentum.deltaPct >= 0 ? "+" : ""}
-              {volumeMomentum.deltaPct}%
-            </span>
-          </div>
-        </div>
       </section>
 
       <section style={dashboardGridStyle}>
+        <section style={{ ...cardStyle, ...spanTwoStyle }}>
+          <div style={sectionHeaderStyle}>
+            <h2 style={sectionTitleStyle}>7-Day Training Read</h2>
+            <span style={sectionBadgeStyle}>Volume by day</span>
+          </div>
+
+          <div style={weeklyChartStyle}>
+            {weeklyChartData.map((day) => {
+              const heightPct = Math.max(8, Math.round((day.volume / maxWeeklyVolume) * 100));
+              return (
+                <div key={day.label} style={weeklyBarWrapStyle}>
+                  <div style={weeklyBarTrackStyle}>
+                    <div
+                      style={{
+                        ...weeklyBarFillStyle,
+                        height: `${day.active ? heightPct : 8}%`,
+                        background: day.active
+                          ? "linear-gradient(180deg, #ff7a7a 0%, #ff4d4d 100%)"
+                          : "#2a2a2a",
+                      }}
+                    />
+                  </div>
+                  <span style={weeklyBarLabelStyle}>{day.label.slice(0, 1)}</span>
+                </div>
+              );
+            })}
+          </div>
+
+          <p style={cardFootnoteStyle}>
+            This makes it easier to see whether you are actually training consistently or just had one big day.
+          </p>
+        </section>
+
+        <section style={cardStyle}>
+          <div style={sectionHeaderStyle}>
+            <h2 style={sectionTitleStyle}>Why Strength Changed</h2>
+          </div>
+
+          <div style={reasonHeadlineStyle}>{strengthWhy.headline}</div>
+          <div style={reasonTextStyle}>{strengthWhy.detail}</div>
+
+          {strengthLeader ? (
+            <div style={reasonMiniGridStyle}>
+              <div style={reasonMiniCardStyle}>
+                <span style={reasonMiniLabelStyle}>Main Lift</span>
+                <span style={reasonMiniValueStyle}>{strengthLeader.name}</span>
+              </div>
+              <div style={reasonMiniCardStyle}>
+                <span style={reasonMiniLabelStyle}>Latest Set</span>
+                <span style={reasonMiniValueStyle}>
+                  {strengthLeader.lastWeight} × {strengthLeader.lastReps}
+                </span>
+              </div>
+              <div style={reasonMiniCardStyle}>
+                <span style={reasonMiniLabelStyle}>Trend</span>
+                <span style={reasonMiniValueStyle}>
+                  {strengthLeader.trendPct >= 0 ? "+" : ""}
+                  {strengthLeader.trendPct}%
+                </span>
+              </div>
+            </div>
+          ) : null}
+        </section>
+
+        <section style={cardStyle}>
+          <div style={sectionHeaderStyle}>
+            <h2 style={sectionTitleStyle}>Body Balance</h2>
+          </div>
+
+          {bodyBalanceSegments.segments.length > 0 ? (
+            <>
+              <div style={donutWrapStyle}>
+                <div
+                  style={{
+                    ...donutStyle,
+                    background: `conic-gradient(${bodyBalanceSegments.gradient})`,
+                  }}
+                >
+                  <div style={donutInnerStyle}>
+                    <div style={donutCenterBigStyle}>{bodyPartSummary.length}</div>
+                    <div style={donutCenterSmallStyle}>areas trained</div>
+                  </div>
+                </div>
+              </div>
+
+              <div style={legendListStyle}>
+                {bodyBalanceSegments.segments.map((segment) => (
+                  <div key={segment.bodyPart} style={legendRowStyle}>
+                    <div style={legendLeftStyle}>
+                      <span
+                        style={{
+                          ...legendDotStyle,
+                          background: segment.color,
+                        }}
+                      />
+                      <span style={legendNameStyle}>{segment.bodyPart}</span>
+                    </div>
+                    <span style={legendValueStyle}>
+                      {segment.sets} sets • {segment.pct}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p style={mutedStyle}>No body balance data yet.</p>
+          )}
+        </section>
+
         <section style={{ ...cardStyle, ...spanTwoStyle }}>
           <div style={sectionHeaderStyle}>
             <h2 style={sectionTitleStyle}>Strength Progress</h2>
@@ -914,47 +1059,47 @@ export default function DashboardPage() {
           )}
         </section>
 
-        <section style={cardStyle}>
+        <section style={{ ...cardStyle, ...spanTwoStyle }}>
           <div style={sectionHeaderStyle}>
-            <h2 style={sectionTitleStyle}>Consistency</h2>
+            <h2 style={sectionTitleStyle}>Lift Intelligence</h2>
+            <span style={sectionBadgeStyle}>Repeated lifts only</span>
           </div>
 
-          <div style={consistencyBlockStyle}>
-            <div style={consistencyStatRowStyle}>
-              <div style={miniMetricStyle}>
-                <span style={miniMetricLabelStyle}>Current</span>
-                <span style={miniMetricValueStyle}>{currentStreak}d</span>
-              </div>
-              <div style={miniMetricStyle}>
-                <span style={miniMetricLabelStyle}>Best</span>
-                <span style={miniMetricValueStyle}>{bestStreak}d</span>
-              </div>
-              <div style={miniMetricStyle}>
-                <span style={miniMetricLabelStyle}>Avg Session</span>
-                <span style={miniMetricValueStyle}>
-                  {avgWorkoutDuration ? `${avgWorkoutDuration}m` : "--"}
-                </span>
-              </div>
-            </div>
+          {liftInsights.length > 0 ? (
+            <div style={liftGridStyle}>
+              {liftInsights.map((lift) => (
+                <div key={lift.name} style={liftCardStyle}>
+                  <div style={liftTopRowStyle}>
+                    <div>
+                      <div style={liftNameStyle}>{lift.name}</div>
+                      <div style={liftBodyPartStyle}>{lift.bodyPart}</div>
+                    </div>
 
-            <div style={heatmapGridStyle}>
-              {heatmapDays.map((day, index) => (
-                <div key={`${day.label}-${index}`} style={heatmapDayWrapStyle}>
-                  <div
-                    style={{
-                      ...heatmapCellStyle,
-                      background: !day.active ? "#1b1b1b" : day.intense ? "#ff5b5b" : "#2ecc71",
-                    }}
-                  />
-                  <span style={heatmapLabelStyle}>{day.label}</span>
+                    <div
+                      style={{
+                        ...trendPillStyle,
+                        color: lift.trendPct >= 0 ? "#7CFFB2" : "#FFB1B1",
+                      }}
+                    >
+                      {lift.trendPct >= 0 ? "+" : ""}
+                      {lift.trendPct}%
+                    </div>
+                  </div>
+
+                  <div style={liftBigStatStyle}>{lift.bestE1RM} est. 1RM</div>
+                  <div style={liftSubLineStyle}>
+                    Latest: {lift.lastWeight || "--"} × {lift.lastReps || "--"}
+                  </div>
+                  <div style={liftSubLineStyle}>Recent avg: {lift.secondAvgE1RM}</div>
+                  <div style={liftSubLineStyle}>{lift.timesLogged} logged sets</div>
                 </div>
               ))}
             </div>
-
-            <p style={cardFootnoteStyle}>
-              Green means you trained. Red means a higher-volume day.
+          ) : (
+            <p style={mutedStyle}>
+              Repeat the same lifts a few times and ReSpawn will start showing meaningful trends here.
             </p>
-          </div>
+          )}
         </section>
 
         <section style={cardStyle}>
@@ -1004,7 +1149,7 @@ export default function DashboardPage() {
             </div>
 
             <div style={miniStatBoxStyle}>
-              <span style={miniStatLabelStyle}>Rest Days Logged</span>
+              <span style={miniStatLabelStyle}>Rest Days</span>
               <span style={miniStatValueStyle}>{restDays.length}</span>
             </div>
 
@@ -1014,56 +1159,38 @@ export default function DashboardPage() {
             </div>
 
             <div style={miniStatBoxStyle}>
-              <span style={miniStatLabelStyle}>Training Style</span>
+              <span style={miniStatLabelStyle}>Rep Bias</span>
               <span style={miniStatValueStyleSmall}>{repBias}</span>
+            </div>
+
+            <div style={miniStatBoxStyle}>
+              <span style={miniStatLabelStyle}>Current Streak</span>
+              <span style={miniStatValueStyle}>{currentStreak}d</span>
+            </div>
+
+            <div style={miniStatBoxStyle}>
+              <span style={miniStatLabelStyle}>Best Streak</span>
+              <span style={miniStatValueStyle}>{bestStreak}d</span>
+            </div>
+
+            <div style={miniStatBoxStyle}>
+              <span style={miniStatLabelStyle}>Avg Session</span>
+              <span style={miniStatValueStyle}>
+                {avgWorkoutDuration ? `${avgWorkoutDuration}m` : "--"}
+              </span>
+            </div>
+
+            <div style={miniStatBoxStyle}>
+              <span style={miniStatLabelStyle}>Volume vs Last Week</span>
+              <span style={miniStatValueStyle}>
+                {volumeMomentum.deltaPct >= 0 ? "+" : ""}
+                {volumeMomentum.deltaPct}%
+              </span>
             </div>
           </div>
         </section>
 
         <section style={{ ...cardStyle, ...spanTwoStyle }}>
-          <div style={sectionHeaderStyle}>
-            <h2 style={sectionTitleStyle}>Lift Intelligence</h2>
-            <span style={sectionBadgeStyle}>Repeated lifts only</span>
-          </div>
-
-          {liftInsights.length > 0 ? (
-            <div style={liftGridStyle}>
-              {liftInsights.map((lift) => (
-                <div key={lift.name} style={liftCardStyle}>
-                  <div style={liftTopRowStyle}>
-                    <div>
-                      <div style={liftNameStyle}>{lift.name}</div>
-                      <div style={liftBodyPartStyle}>{lift.bodyPart}</div>
-                    </div>
-
-                    <div
-                      style={{
-                        ...trendPillStyle,
-                        color: lift.trendPct >= 0 ? "#7CFFB2" : "#FFB1B1",
-                      }}
-                    >
-                      {lift.trendPct >= 0 ? "+" : ""}
-                      {lift.trendPct}%
-                    </div>
-                  </div>
-
-                  <div style={liftBigStatStyle}>{lift.bestE1RM} est. 1RM</div>
-                  <div style={liftSubLineStyle}>
-                    Latest: {lift.lastWeight || "--"} × {lift.lastReps || "--"}
-                  </div>
-                  <div style={liftSubLineStyle}>Latest est. strength: {lift.latestE1RM}</div>
-                  <div style={liftSubLineStyle}>{lift.timesLogged} logged sets</div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p style={mutedStyle}>
-              Repeat the same lifts a few times and ReSpawn will start showing meaningful trends here.
-            </p>
-          )}
-        </section>
-
-        <section style={cardStyle}>
           <div style={sectionHeaderStyle}>
             <h2 style={sectionTitleStyle}>Coach Feed</h2>
           </div>
@@ -1090,37 +1217,6 @@ export default function DashboardPage() {
             </div>
           ) : (
             <p style={mutedStyle}>No coaching signals yet. Keep logging training.</p>
-          )}
-        </section>
-
-        <section style={cardStyle}>
-          <div style={sectionHeaderStyle}>
-            <h2 style={sectionTitleStyle}>Body Balance</h2>
-          </div>
-
-          {bodyPartSummary.length > 0 ? (
-            <div style={bodyBalanceListStyle}>
-              {bodyPartSummary.slice(0, 6).map((item) => {
-                const maxSets = bodyPartSummary[0]?.sets || 1;
-                const widthPct = Math.max(10, Math.round((item.sets / maxSets) * 100));
-
-                return (
-                  <div key={item.bodyPart} style={bodyBalanceRowStyle}>
-                    <div style={bodyBalanceTopStyle}>
-                      <span style={bodyPartNameStyle}>{item.bodyPart}</span>
-                      <span style={bodyPartSubStyle}>
-                        {item.sets} sets • {formatCompact(item.volume)} vol
-                      </span>
-                    </div>
-                    <div style={barTrackStyle}>
-                      <div style={{ ...barFillStyle, width: `${widthPct}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p style={mutedStyle}>No body-part balance data yet.</p>
           )}
         </section>
       </section>
@@ -1191,6 +1287,55 @@ const ghostButtonStyle: CSSProperties = {
   fontSize: "13px",
 };
 
+const heroCoachFeedWrapStyle: CSSProperties = {
+  display: "grid",
+  gap: "10px",
+  marginTop: "18px",
+  maxWidth: "860px",
+};
+
+const heroCoachFeedLabelStyle: CSSProperties = {
+  color: "#ff9b9b",
+  fontSize: "12px",
+  fontWeight: 800,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+};
+
+const heroCoachFeedListStyle: CSSProperties = {
+  display: "grid",
+  gap: "10px",
+};
+
+const heroCoachFeedCardStyle: CSSProperties = {
+  background: "rgba(255,255,255,0.05)",
+  borderRadius: "16px",
+  padding: "12px 14px",
+};
+
+const heroCoachFeedTitleStyle: CSSProperties = {
+  color: "#ffffff",
+  fontSize: "14px",
+  fontWeight: 800,
+};
+
+const heroCoachFeedTextStyle: CSSProperties = {
+  color: "#cfcfcf",
+  fontSize: "13px",
+  lineHeight: 1.45,
+  marginTop: "4px",
+};
+
+const heroCoachFeedEmptyStyle: CSSProperties = {
+  color: "#bdbdbd",
+  fontSize: "13px",
+  lineHeight: 1.45,
+  background: "rgba(255,255,255,0.05)",
+  border: "1px solid rgba(255,255,255,0.07)",
+  borderRadius: "16px",
+  padding: "12px 14px",
+};
+
 const heroInsightCardStyle: CSSProperties = {
   marginTop: "18px",
   background: "rgba(255,255,255,0.05)",
@@ -1258,34 +1403,6 @@ const smallPrimaryButtonStyle: CSSProperties = {
   width: "100%",
 };
 
-const heroStatsGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
-  gap: "10px",
-  marginTop: "18px",
-};
-
-const heroStatCardStyle: CSSProperties = {
-  background: "rgba(255,255,255,0.04)",
-  border: "1px solid rgba(255,255,255,0.06)",
-  borderRadius: "16px",
-  padding: "14px 12px",
-  display: "flex",
-  flexDirection: "column",
-  gap: "6px",
-};
-
-const heroStatLabelStyle: CSSProperties = {
-  color: "#aaaaaa",
-  fontSize: "12px",
-};
-
-const heroStatValueStyle: CSSProperties = {
-  color: "#ffffff",
-  fontSize: "24px",
-  fontWeight: 900,
-};
-
 const dashboardGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
@@ -1328,6 +1445,167 @@ const sectionBadgeStyle: CSSProperties = {
   textTransform: "uppercase",
 };
 
+const weeklyChartStyle: CSSProperties = {
+  height: "220px",
+  display: "grid",
+  gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
+  gap: "14px",
+  alignItems: "end",
+  marginTop: "8px",
+};
+
+const weeklyBarWrapStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  gap: "10px",
+  height: "100%",
+};
+
+const weeklyBarTrackStyle: CSSProperties = {
+  height: "100%",
+  width: "100%",
+  borderRadius: "14px",
+  background: "#1a1a1a",
+  border: "1px solid #262626",
+  display: "flex",
+  alignItems: "flex-end",
+  padding: "6px",
+  boxSizing: "border-box",
+};
+
+const weeklyBarFillStyle: CSSProperties = {
+  width: "100%",
+  borderRadius: "10px",
+};
+
+const weeklyBarLabelStyle: CSSProperties = {
+  color: "#9f9f9f",
+  fontSize: "12px",
+  fontWeight: 700,
+};
+
+const reasonHeadlineStyle: CSSProperties = {
+  color: "#ffffff",
+  fontSize: "22px",
+  fontWeight: 900,
+  lineHeight: 1.2,
+};
+
+const reasonTextStyle: CSSProperties = {
+  color: "#cbcbcb",
+  fontSize: "14px",
+  lineHeight: 1.5,
+  marginTop: "10px",
+};
+
+const reasonMiniGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: "10px",
+  marginTop: "16px",
+};
+
+const reasonMiniCardStyle: CSSProperties = {
+  background: "#171717",
+  border: "1px solid #252525",
+  borderRadius: "14px",
+  padding: "12px",
+  display: "flex",
+  flexDirection: "column",
+  gap: "6px",
+};
+
+const reasonMiniLabelStyle: CSSProperties = {
+  color: "#a6a6a6",
+  fontSize: "12px",
+};
+
+const reasonMiniValueStyle: CSSProperties = {
+  color: "#ffffff",
+  fontSize: "14px",
+  fontWeight: 800,
+  lineHeight: 1.35,
+};
+
+const donutWrapStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "center",
+  marginTop: "8px",
+  marginBottom: "18px",
+};
+
+const donutStyle: CSSProperties = {
+  width: "180px",
+  height: "180px",
+  borderRadius: "50%",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
+
+const donutInnerStyle: CSSProperties = {
+  width: "104px",
+  height: "104px",
+  borderRadius: "50%",
+  background: "#121212",
+  border: "1px solid #252525",
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  justifyContent: "center",
+};
+
+const donutCenterBigStyle: CSSProperties = {
+  color: "#ffffff",
+  fontSize: "28px",
+  fontWeight: 900,
+  lineHeight: 1,
+};
+
+const donutCenterSmallStyle: CSSProperties = {
+  color: "#9f9f9f",
+  fontSize: "11px",
+  marginTop: "6px",
+  textAlign: "center",
+};
+
+const legendListStyle: CSSProperties = {
+  display: "grid",
+  gap: "10px",
+};
+
+const legendRowStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "12px",
+};
+
+const legendLeftStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "10px",
+};
+
+const legendDotStyle: CSSProperties = {
+  width: "12px",
+  height: "12px",
+  borderRadius: "50%",
+  display: "inline-block",
+};
+
+const legendNameStyle: CSSProperties = {
+  color: "#ffffff",
+  fontWeight: 700,
+  fontSize: "14px",
+};
+
+const legendValueStyle: CSSProperties = {
+  color: "#b8b8b8",
+  fontSize: "13px",
+};
+
 const strengthGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
@@ -1362,85 +1640,6 @@ const strengthCardSubStyle: CSSProperties = {
   fontSize: "13px",
   lineHeight: 1.4,
   marginTop: "8px",
-};
-
-const consistencyBlockStyle: CSSProperties = {
-  display: "grid",
-  gap: "16px",
-};
-
-const consistencyStatRowStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-  gap: "10px",
-};
-
-const miniMetricStyle: CSSProperties = {
-  background: "#171717",
-  border: "1px solid #252525",
-  borderRadius: "14px",
-  padding: "14px 12px",
-  display: "flex",
-  flexDirection: "column",
-  gap: "6px",
-};
-
-const miniMetricLabelStyle: CSSProperties = {
-  color: "#a9a9a9",
-  fontSize: "12px",
-};
-
-const miniMetricValueStyle: CSSProperties = {
-  color: "#ffffff",
-  fontWeight: 900,
-  fontSize: "18px",
-};
-
-const nextTargetTitleStyle: CSSProperties = {
-  color: "#ffffff",
-  fontSize: "24px",
-  lineHeight: 1.25,
-  fontWeight: 900,
-};
-
-const nextTargetTextStyle: CSSProperties = {
-  color: "#cfcfcf",
-  fontSize: "14px",
-  lineHeight: 1.5,
-  marginTop: "10px",
-};
-
-const heatmapGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
-  gap: "10px",
-};
-
-const heatmapDayWrapStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  gap: "6px",
-};
-
-const heatmapCellStyle: CSSProperties = {
-  width: "100%",
-  aspectRatio: "1 / 1",
-  minHeight: "24px",
-  borderRadius: "10px",
-  border: "1px solid rgba(255,255,255,0.06)",
-};
-
-const heatmapLabelStyle: CSSProperties = {
-  color: "#7f7f7f",
-  fontSize: "11px",
-  fontWeight: 700,
-};
-
-const cardFootnoteStyle: CSSProperties = {
-  color: "#8d8d8d",
-  fontSize: "12px",
-  margin: 0,
 };
 
 const liftGridStyle: CSSProperties = {
@@ -1497,6 +1696,20 @@ const liftSubLineStyle: CSSProperties = {
   color: "#c7c7c7",
   fontSize: "13px",
   marginTop: "6px",
+};
+
+const nextTargetTitleStyle: CSSProperties = {
+  color: "#ffffff",
+  fontSize: "24px",
+  lineHeight: 1.25,
+  fontWeight: 900,
+};
+
+const nextTargetTextStyle: CSSProperties = {
+  color: "#cfcfcf",
+  fontSize: "14px",
+  lineHeight: 1.5,
+  marginTop: "10px",
 };
 
 const statsGridStyle: CSSProperties = {
@@ -1557,47 +1770,11 @@ const feedDetailStyle: CSSProperties = {
   lineHeight: 1.45,
 };
 
-const bodyBalanceListStyle: CSSProperties = {
-  display: "grid",
-  gap: "12px",
-};
-
-const bodyBalanceRowStyle: CSSProperties = {
-  display: "grid",
-  gap: "8px",
-};
-
-const bodyBalanceTopStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: "12px",
-};
-
-const bodyPartNameStyle: CSSProperties = {
-  color: "#ffffff",
-  fontWeight: 800,
-  fontSize: "15px",
-};
-
-const bodyPartSubStyle: CSSProperties = {
-  color: "#b8b8b8",
-  fontSize: "13px",
-};
-
-const barTrackStyle: CSSProperties = {
-  width: "100%",
-  height: "10px",
-  borderRadius: "999px",
-  background: "#1c1c1c",
-  overflow: "hidden",
-  border: "1px solid #252525",
-};
-
-const barFillStyle: CSSProperties = {
-  height: "100%",
-  borderRadius: "999px",
-  background: "linear-gradient(90deg, #ff4d4d 0%, #ff8b8b 100%)",
+const cardFootnoteStyle: CSSProperties = {
+  color: "#8d8d8d",
+  fontSize: "12px",
+  marginTop: "12px",
+  marginBottom: 0,
 };
 
 const mutedStyle: CSSProperties = {
