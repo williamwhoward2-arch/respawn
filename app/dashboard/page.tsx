@@ -42,25 +42,6 @@ type WorkoutSet = {
   created_at: string;
 };
 
-type LiftInsightCard = {
-  name: string;
-  bodyPart: string;
-  bestE1RM: number;
-  latestE1RM: number;
-  trendPct: number;
-  timesLogged: number;
-  lastWeight: number;
-  lastReps: number;
-  firstAvgE1RM: number;
-  secondAvgE1RM: number;
-};
-
-type StrengthCard = {
-  label: string;
-  value: string;
-  sub: string;
-};
-
 type CoachFeedItem = {
   title: string;
   detail: string;
@@ -71,6 +52,25 @@ type BodyPartSummaryItem = {
   bodyPart: string;
   sets: number;
   volume: number;
+};
+
+type Recommendation = {
+  title: string;
+  detail: string;
+  cta: string;
+  mode: "train" | "rest" | "light";
+  suggestedBodyPart?: string | null;
+  readinessLabel: string;
+};
+
+type PerformanceHighlight = {
+  title: "Performance";
+  detail: string;
+};
+
+type Candidate = {
+  score: number;
+  detail: string;
 };
 
 export default function DashboardPage() {
@@ -144,13 +144,11 @@ export default function DashboardPage() {
 
   async function handleSignOut() {
     const { error } = await supabase.auth.signOut();
-
     if (error) {
       console.error("Sign out error:", error);
       setStatus(`Error signing out: ${error.message}`);
       return;
     }
-
     router.replace("/login");
   }
 
@@ -159,15 +157,19 @@ export default function DashboardPage() {
     return Number.isFinite(num) ? num : 0;
   }
 
-  function estimate1RM(weight: number, reps: number) {
-    if (!weight || !reps) return 0;
-    return weight * (1 + reps / 30);
-  }
-
   function startOfDay(dateInput: string | Date) {
     const d = new Date(dateInput);
     d.setHours(0, 0, 0, 0);
     return d;
+  }
+
+  function startOfWeekMonday(d: Date) {
+    const day = d.getDay(); // 0=Sun, 1=Mon, ...
+    const diff = (day + 6) % 7; // Monday-start
+    const start = new Date(d);
+    start.setDate(d.getDate() - diff);
+    start.setHours(0, 0, 0, 0);
+    return start;
   }
 
   function titleCase(value: string) {
@@ -182,7 +184,178 @@ export default function DashboardPage() {
     return `${Math.round(value)}`;
   }
 
-  const today = startOfDay(new Date());
+  function estimate1RM(weight: number, reps: number) {
+    if (!weight || !reps) return 0;
+    return weight * (1 + reps / 30);
+  }
+
+  function hashStringToInt(input: string) {
+    let h = 0;
+    for (let i = 0; i < input.length; i += 1) {
+      h = (h << 5) - h + input.charCodeAt(i);
+      h |= 0;
+    }
+    return Math.abs(h);
+  }
+
+  function pickPerformanceHighlight(args: {
+    completedSets: WorkoutSet[];
+    workoutsById: Map<number, Workout>;
+    weekStart: Date;
+    weekEndExclusive: Date;
+    today: Date;
+    recentBodyPartSummary: BodyPartSummaryItem[];
+    workoutsThisWeek: number;
+    totalVolumeThisWeek: number;
+    uniqueExercises: number;
+  }): PerformanceHighlight | null {
+    const {
+      completedSets,
+      workoutsById,
+      weekStart,
+      weekEndExclusive,
+      today,
+      recentBodyPartSummary,
+      workoutsThisWeek,
+      totalVolumeThisWeek,
+      uniqueExercises,
+    } = args;
+
+    if (completedSets.length === 0) return null;
+
+    const candidates: Candidate[] = [];
+
+    // A) Best set THIS WEEK (Mon–Sun)
+    let bestWeekSet: { name: string; weight: number; reps: number; e1rm: number } | null = null;
+
+    for (const s of completedSets) {
+      const w = workoutsById.get(s.workout_id);
+      if (!w) continue;
+
+      const wd = startOfDay(w.created_at);
+      if (wd < weekStart || wd >= weekEndExclusive) continue;
+
+      const weight = Number(s.weight) || 0;
+      const reps = Number(s.reps) || 0;
+      if (weight <= 0 || reps <= 0) continue;
+
+      const e1rm = estimate1RM(weight, reps);
+      if (!bestWeekSet || e1rm > bestWeekSet.e1rm) {
+        bestWeekSet = { name: s.exercise_name ?? "Exercise", weight, reps, e1rm };
+      }
+    }
+
+    if (bestWeekSet) {
+      candidates.push({
+        score: 160 + Math.min(80, Math.round(bestWeekSet.e1rm / 2)),
+        detail: `Best set this week: ${bestWeekSet.weight} × ${bestWeekSet.reps} on ${bestWeekSet.name}.`,
+      });
+    }
+
+    // B) Improvement on a repeated lift (last vs previous), not week-bounded but meaningful
+    const setsByExercise = new Map<string, WorkoutSet[]>();
+    for (const s of completedSets) {
+      const name = (s.exercise_name ?? "").trim();
+      if (!name) continue;
+      const key = name.toLowerCase();
+      if (!setsByExercise.has(key)) setsByExercise.set(key, []);
+      setsByExercise.get(key)!.push(s);
+    }
+
+    let bestImprovement: { name: string; deltaPct: number; prev: number; curr: number } | null = null;
+
+    for (const [key, arr] of setsByExercise.entries()) {
+      if (arr.length < 4) continue;
+
+      const sorted = [...arr].sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      );
+      const last = sorted[sorted.length - 1];
+      const prev = sorted[sorted.length - 2];
+
+      const lastE = estimate1RM(Number(last.weight) || 0, Number(last.reps) || 0);
+      const prevE = estimate1RM(Number(prev.weight) || 0, Number(prev.reps) || 0);
+      if (prevE <= 0 || lastE <= 0) continue;
+
+      const deltaPct = ((lastE - prevE) / prevE) * 100;
+      if (deltaPct >= 4) {
+        if (!bestImprovement || deltaPct > bestImprovement.deltaPct) {
+          bestImprovement = {
+            name: arr[0].exercise_name ?? key,
+            deltaPct,
+            prev: Math.round(prevE),
+            curr: Math.round(lastE),
+          };
+        }
+      }
+    }
+
+    if (bestImprovement) {
+      candidates.push({
+        score: 190 + Math.min(60, Math.round(bestImprovement.deltaPct * 4)),
+        detail: `Improved: ${bestImprovement.name} up ${Math.round(
+          bestImprovement.deltaPct
+        )}% (est. ${bestImprovement.prev} → ${bestImprovement.curr}).`,
+      });
+    }
+
+    // C) Most trained area THIS WEEK (Mon–Sun)
+    if (recentBodyPartSummary.length > 0) {
+      const leader = [...recentBodyPartSummary].sort((a, b) => b.sets - a.sets)[0];
+      if (leader && leader.sets >= 6) {
+        candidates.push({
+          score: 145 + Math.min(40, leader.sets * 2),
+          detail: `${leader.bodyPart} is your most worked area this week.`,
+        });
+      }
+    }
+
+    // D) Weekly consistency milestone
+    if (workoutsThisWeek >= 4) {
+      candidates.push({
+        score: 140 + workoutsThisWeek * 4,
+        detail: `Strong week: ${workoutsThisWeek} workouts logged so far.`,
+      });
+    }
+
+    // E) Output milestone (celebration only)
+    if (totalVolumeThisWeek >= 25000) {
+      candidates.push({
+        score: 135 + Math.min(40, Math.round(totalVolumeThisWeek / 20000)),
+        detail: `Output: ${Math.round(totalVolumeThisWeek).toLocaleString()} total lbs moved this week.`,
+      });
+    }
+
+    // F) Variety milestone
+    if (uniqueExercises >= 12) {
+      candidates.push({
+        score: 120 + Math.min(30, uniqueExercises),
+        detail: `Variety: ${uniqueExercises} unique exercises logged recently.`,
+      });
+    }
+
+    if (candidates.length === 0) return null;
+
+    const sorted = [...candidates].sort((a, b) => b.score - a.score);
+    const topScore = sorted[0].score;
+    const topPool = sorted.filter((c) => c.score >= topScore - 10).slice(0, 4);
+
+    // Rotate among top items daily so it feels alive
+    const dayKey = today.toISOString().slice(0, 10); // YYYY-MM-DD
+    const pickIndex = topPool.length > 1 ? hashStringToInt(dayKey) % topPool.length : 0;
+    const chosen = topPool[pickIndex] ?? sorted[0];
+
+    return { title: "Performance", detail: chosen.detail };
+  }
+
+  const today = useMemo(() => startOfDay(new Date()), []);
+  const weekStart = useMemo(() => startOfWeekMonday(today), [today]);
+  const weekEndExclusive = useMemo(() => {
+    const d = new Date(weekStart);
+    d.setDate(weekStart.getDate() + 7);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }, [weekStart]);
 
   const workoutsById = useMemo(() => {
     const map = new Map<number, Workout>();
@@ -210,6 +383,7 @@ export default function DashboardPage() {
     });
   }, [sets, trainingWorkoutIds]);
 
+  // For streak + week view
   const workoutDays = useMemo(() => {
     const map = new Map<string, { count: number; volume: number }>();
 
@@ -233,24 +407,6 @@ export default function DashboardPage() {
     return map;
   }, [trainingWorkouts, completedSets, workoutsById]);
 
-  const last7Start = useMemo(() => {
-    const d = new Date(today);
-    d.setDate(today.getDate() - 6);
-    return d;
-  }, [today]);
-
-  const prev7Start = useMemo(() => {
-    const d = new Date(today);
-    d.setDate(today.getDate() - 13);
-    return d;
-  }, [today]);
-
-  const prev7End = useMemo(() => {
-    const d = new Date(today);
-    d.setDate(today.getDate() - 7);
-    return d;
-  }, [today]);
-
   const last30Start = useMemo(() => {
     const d = new Date(today);
     d.setDate(today.getDate() - 29);
@@ -258,8 +414,11 @@ export default function DashboardPage() {
   }, [today]);
 
   const workoutsThisWeek = useMemo(() => {
-    return trainingWorkouts.filter((w) => startOfDay(w.created_at) >= last7Start).length;
-  }, [trainingWorkouts, last7Start]);
+    return trainingWorkouts.filter((w) => {
+      const d = startOfDay(w.created_at);
+      return d >= weekStart && d < weekEndExclusive;
+    }).length;
+  }, [trainingWorkouts, weekStart, weekEndExclusive]);
 
   const workoutsLast30 = useMemo(() => {
     return trainingWorkouts.filter((w) => startOfDay(w.created_at) >= last30Start).length;
@@ -272,9 +431,7 @@ export default function DashboardPage() {
 
     if (durations.length === 0) return 0;
 
-    return Math.round(
-      durations.reduce((sum, value) => sum + value, 0) / durations.length / 60
-    );
+    return Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length / 60);
   }, [trainingWorkouts]);
 
   const currentStreak = useMemo(() => {
@@ -325,45 +482,6 @@ export default function DashboardPage() {
     return best;
   }, [workoutDays]);
 
-  const totalVolumeThisWeek = useMemo(() => {
-    const last7Ids = new Set(
-      trainingWorkouts
-        .filter((w) => startOfDay(w.created_at) >= last7Start)
-        .map((w) => w.id)
-    );
-
-    return completedSets
-      .filter((set) => last7Ids.has(set.workout_id))
-      .reduce((sum, set) => sum + toNumber(set.weight) * toNumber(set.reps), 0);
-  }, [trainingWorkouts, completedSets, last7Start]);
-
-  const totalSetsThisWeek = useMemo(() => {
-    const last7Ids = new Set(
-      trainingWorkouts
-        .filter((w) => startOfDay(w.created_at) >= last7Start)
-        .map((w) => w.id)
-    );
-
-    return completedSets.filter((set) => last7Ids.has(set.workout_id)).length;
-  }, [trainingWorkouts, completedSets, last7Start]);
-
-  const lifetimeVolume = useMemo(() => {
-    return completedSets.reduce(
-      (sum, set) => sum + toNumber(set.weight) * toNumber(set.reps),
-      0
-    );
-  }, [completedSets]);
-
-  const uniqueExercises = useMemo(() => {
-    const unique = new Set(
-      completedSets
-        .map((set) => (set.exercise_name ?? "").trim())
-        .filter(Boolean)
-        .map((name) => name.toLowerCase())
-    );
-    return unique.size;
-  }, [completedSets]);
-
   const lastWorkout = useMemo(() => {
     return [...trainingWorkouts].sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
@@ -376,6 +494,49 @@ export default function DashboardPage() {
     return Math.floor(diff / (1000 * 60 * 60 * 24));
   }, [today, lastWorkout]);
 
+  const totalVolumeThisWeek = useMemo(() => {
+    const weekIds = new Set(
+      trainingWorkouts
+        .filter((w) => {
+          const d = startOfDay(w.created_at);
+          return d >= weekStart && d < weekEndExclusive;
+        })
+        .map((w) => w.id)
+    );
+
+    return completedSets
+      .filter((set) => weekIds.has(set.workout_id))
+      .reduce((sum, set) => sum + toNumber(set.weight) * toNumber(set.reps), 0);
+  }, [trainingWorkouts, completedSets, weekStart, weekEndExclusive]);
+
+  const totalSetsThisWeek = useMemo(() => {
+    const weekIds = new Set(
+      trainingWorkouts
+        .filter((w) => {
+          const d = startOfDay(w.created_at);
+          return d >= weekStart && d < weekEndExclusive;
+        })
+        .map((w) => w.id)
+    );
+
+    return completedSets.filter((set) => weekIds.has(set.workout_id)).length;
+  }, [trainingWorkouts, completedSets, weekStart, weekEndExclusive]);
+
+  const lifetimeVolume = useMemo(() => {
+    return completedSets.reduce((sum, set) => sum + toNumber(set.weight) * toNumber(set.reps), 0);
+  }, [completedSets]);
+
+  const uniqueExercises = useMemo(() => {
+    const unique = new Set(
+      completedSets
+        .map((set) => (set.exercise_name ?? "").trim())
+        .filter(Boolean)
+        .map((name) => name.toLowerCase())
+    );
+    return unique.size;
+  }, [completedSets]);
+
+  // Body Balance stays lifetime-ish (works well visually)
   const bodyPartSummary = useMemo<BodyPartSummaryItem[]>(() => {
     const map = new Map<string, { sets: number; volume: number }>();
 
@@ -396,400 +557,74 @@ export default function DashboardPage() {
       .sort((a, b) => b.sets - a.sets);
   }, [completedSets]);
 
-  const repBias = useMemo(() => {
-    if (completedSets.length === 0) return "Learning";
-
-    const avgReps = Math.round(
-      completedSets.reduce((sum, set) => sum + toNumber(set.reps), 0) / completedSets.length
-    );
-
-    if (avgReps <= 6) return "Strength";
-    if (avgReps <= 12) return "Hypertrophy";
-    return "Endurance";
-  }, [completedSets]);
-
-  const volumeMomentum = useMemo(() => {
-    const last7Workouts = trainingWorkouts.filter(
-      (w) => startOfDay(w.created_at) >= last7Start
-    );
-
-    const prev7Workouts = trainingWorkouts.filter((w) => {
-      const d = startOfDay(w.created_at);
-      return d >= prev7Start && d <= prev7End;
-    });
-
-    const last7Ids = new Set(last7Workouts.map((w) => w.id));
-    const prev7Ids = new Set(prev7Workouts.map((w) => w.id));
-
-    const last7Volume = completedSets
-      .filter((s) => last7Ids.has(s.workout_id))
-      .reduce((sum, s) => sum + toNumber(s.weight) * toNumber(s.reps), 0);
-
-    const prev7Volume = completedSets
-      .filter((s) => prev7Ids.has(s.workout_id))
-      .reduce((sum, s) => sum + toNumber(s.weight) * toNumber(s.reps), 0);
-
-    const deltaPct =
-      prev7Volume > 0
-        ? Math.round(((last7Volume - prev7Volume) / prev7Volume) * 100)
-        : last7Volume > 0
-        ? 100
-        : 0;
-
-    return {
-      last7Volume,
-      prev7Volume,
-      deltaPct,
-    };
-  }, [trainingWorkouts, completedSets, last7Start, prev7Start, prev7End]);
-
-  const strongestEstimatedLift = useMemo(() => {
-    if (completedSets.length === 0) return null;
-
-    const ranked = completedSets
-      .map((set) => {
-        const weight = toNumber(set.weight);
-        const reps = toNumber(set.reps);
-        return {
-          name: set.exercise_name ?? "Exercise",
-          e1rm: Math.round(estimate1RM(weight, reps)),
-          weight,
-          reps,
-        };
-      })
-      .sort((a, b) => b.e1rm - a.e1rm);
-
-    return ranked[0] ?? null;
-  }, [completedSets]);
-
-  const liftInsights = useMemo<LiftInsightCard[]>(() => {
-    const map = new Map<
-      string,
-      {
-        name: string;
-        bodyPart: string;
-        sets: WorkoutSet[];
-      }
-    >();
+  // Week summary for highlights + recommendation scoring
+  const weekBodyPartSummary = useMemo<BodyPartSummaryItem[]>(() => {
+    const map = new Map<string, { sets: number; volume: number }>();
 
     for (const set of completedSets) {
-      const name = (set.exercise_name ?? "").trim();
-      if (!name) continue;
+      const workout = workoutsById.get(set.workout_id);
+      if (!workout) continue;
 
-      const key = name.toLowerCase();
+      const d = startOfDay(workout.created_at);
+      if (d < weekStart || d >= weekEndExclusive) continue;
 
-      if (!map.has(key)) {
-        map.set(key, {
-          name,
-          bodyPart: set.body_part ? titleCase(set.body_part) : "Other",
-          sets: [],
-        });
-      }
-
-      map.get(key)!.sets.push(set);
+      const bodyPart = set.body_part ? titleCase(set.body_part) : "Other";
+      const current = map.get(bodyPart) ?? { sets: 0, volume: 0 };
+      current.sets += 1;
+      current.volume += toNumber(set.weight) * toNumber(set.reps);
+      map.set(bodyPart, current);
     }
 
-    return Array.from(map.values())
-      .map((item) => {
-        const sorted = [...item.sets].sort(
-          (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-        );
-
-        const last = sorted[sorted.length - 1];
-        const splitIndex = Math.max(1, Math.floor(sorted.length / 2));
-        const firstHalf = sorted.slice(0, splitIndex);
-        const secondHalf = sorted.slice(splitIndex);
-
-        const firstAvg =
-          firstHalf.reduce(
-            (sum, set) => sum + estimate1RM(toNumber(set.weight), toNumber(set.reps)),
-            0
-          ) / firstHalf.length;
-
-        const secondSource = secondHalf.length > 0 ? secondHalf : firstHalf;
-
-        const secondAvg =
-          secondSource.reduce(
-            (sum, set) => sum + estimate1RM(toNumber(set.weight), toNumber(set.reps)),
-            0
-          ) / secondSource.length;
-
-        const bestE1RM = Math.round(
-          Math.max(
-            ...sorted.map((set) => estimate1RM(toNumber(set.weight), toNumber(set.reps)))
-          )
-        );
-
-        const latestE1RM = Math.round(
-          estimate1RM(toNumber(last?.weight), toNumber(last?.reps))
-        );
-
-        const trendPct =
-          firstAvg > 0 ? Math.round(((secondAvg - firstAvg) / firstAvg) * 100) : 0;
-
-        return {
-          name: item.name,
-          bodyPart: item.bodyPart,
-          bestE1RM,
-          latestE1RM,
-          trendPct,
-          timesLogged: sorted.length,
-          lastWeight: toNumber(last?.weight),
-          lastReps: toNumber(last?.reps),
-          firstAvgE1RM: Math.round(firstAvg),
-          secondAvgE1RM: Math.round(secondAvg),
-        };
-      })
-      .filter((item) => item.timesLogged >= 3)
-      .sort((a, b) => b.bestE1RM - a.bestE1RM)
-      .slice(0, 4);
-  }, [completedSets]);
-
-  const strengthCards = useMemo<StrengthCard[]>(() => {
-    if (completedSets.length === 0) return [];
-
-    const strongestByE1RM = [...completedSets]
-      .map((set) => ({
-        name: set.exercise_name ?? "Exercise",
-        weight: toNumber(set.weight),
-        reps: toNumber(set.reps),
-        e1rm: Math.round(estimate1RM(toNumber(set.weight), toNumber(set.reps))),
+    return Array.from(map.entries())
+      .map(([bodyPart, value]) => ({
+        bodyPart,
+        sets: value.sets,
+        volume: value.volume,
       }))
-      .sort((a, b) => b.e1rm - a.e1rm)[0];
+      .sort((a, b) => a.sets - b.sets);
+  }, [completedSets, workoutsById, weekStart, weekEndExclusive]);
 
-    const heaviestWeight = [...completedSets]
-      .map((set) => ({
-        name: set.exercise_name ?? "Exercise",
-        weight: toNumber(set.weight),
-        reps: toNumber(set.reps),
-      }))
-      .sort((a, b) => b.weight - a.weight)[0];
+  const bodyPartLastTrained = useMemo(() => {
+    const map = new Map<string, Date>();
 
-    const highestRepSet = [...completedSets]
-      .map((set) => ({
-        name: set.exercise_name ?? "Exercise",
-        weight: toNumber(set.weight),
-        reps: toNumber(set.reps),
-      }))
-      .sort((a, b) => b.reps - a.reps)[0];
+    for (const set of completedSets) {
+      const workout = workoutsById.get(set.workout_id);
+      if (!workout) continue;
 
-    const cards: StrengthCard[] = [];
+      const bodyPart = set.body_part ? titleCase(set.body_part) : "Other";
+      const workoutDate = startOfDay(workout.created_at);
+      const existing = map.get(bodyPart);
 
-    if (strongestByE1RM) {
-      cards.push({
-        label: "Top Strength Score",
-        value: `${strongestByE1RM.e1rm}`,
-        sub: `${strongestByE1RM.name} • ${strongestByE1RM.weight} × ${strongestByE1RM.reps}`,
-      });
+      if (!existing || workoutDate > existing) map.set(bodyPart, workoutDate);
     }
 
-    if (heaviestWeight) {
-      cards.push({
-        label: "Heaviest Set",
-        value: `${heaviestWeight.weight} lb`,
-        sub: `${heaviestWeight.name} • ${heaviestWeight.reps} reps`,
-      });
-    }
+    return map;
+  }, [completedSets, workoutsById]);
 
-    if (highestRepSet) {
-      cards.push({
-        label: "Highest Rep Set",
-        value: `${highestRepSet.reps}`,
-        sub: `${highestRepSet.name} • ${highestRepSet.weight} lb`,
-      });
-    }
+  function getDaysSinceBodyPart(bodyPart: string) {
+    const lastDate = bodyPartLastTrained.get(bodyPart);
+    if (!lastDate) return 999;
+    return Math.floor((today.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
+  }
 
-    return cards;
-  }, [completedSets]);
+  const readiness = useMemo(() => {
+    if (completedSets.length === 0) return { label: "New Signal", tone: "neutral" as const };
+    if (currentStreak >= 4) return { label: "Needs Recovery", tone: "warn" as const };
+    if (currentStreak >= 3) return { label: "Moderate Fatigue", tone: "neutral" as const };
+    if (daysSinceLastWorkout !== null && daysSinceLastWorkout >= 3)
+      return { label: "Fresh", tone: "good" as const };
+    return { label: "Train Ready", tone: "good" as const };
+  }, [completedSets.length, currentStreak, daysSinceLastWorkout]);
 
-  const mostUndertrainedBodyPart = useMemo(() => {
-    if (bodyPartSummary.length < 2) return null;
-
-    const sortedAsc = [...bodyPartSummary].sort((a, b) => a.sets - b.sets);
-    const sortedDesc = [...bodyPartSummary].sort((a, b) => b.sets - a.sets);
-
-    const lowest = sortedAsc[0];
-    const highest = sortedDesc[0];
-
-    if (!lowest || !highest) return null;
-
-    return {
-      lowest,
-      highest,
-      gap: highest.sets - lowest.sets,
-    };
-  }, [bodyPartSummary]);
-
-  const strengthLeader = useMemo(() => {
-    return liftInsights[0] ?? null;
-  }, [liftInsights]);
-
-  const strengthWhy = useMemo(() => {
-    if (!strengthLeader) {
-      return {
-        headline: "Not enough repeated lift data yet",
-        detail:
-          "Repeat the same key lifts a few more times and ReSpawn will explain whether strength is moving up, flat, or down.",
-      };
-    }
-
-    const delta = strengthLeader.trendPct;
-
-    if (delta < 0) {
-      return {
-        headline: `${strengthLeader.name} is pulling your strength trend down`,
-        detail: `Your repeated-lift trend is ${delta}% on ${strengthLeader.name}. Early average estimated strength was ${strengthLeader.firstAvgE1RM}, and your more recent average is ${strengthLeader.secondAvgE1RM}. Your latest logged set was ${strengthLeader.lastWeight} × ${strengthLeader.lastReps}.`,
-      };
-    }
-
-    if (delta > 0) {
-      return {
-        headline: `${strengthLeader.name} is driving your strength trend up`,
-        detail: `Your repeated-lift trend is +${delta}% on ${strengthLeader.name}. Early average estimated strength was ${strengthLeader.firstAvgE1RM}, and your more recent average is ${strengthLeader.secondAvgE1RM}.`,
-      };
-    }
-
-    return {
-      headline: `${strengthLeader.name} is holding steady`,
-      detail: `Your repeated-lift trend is flat right now. Early average estimated strength was ${strengthLeader.firstAvgE1RM}, and your recent average is ${strengthLeader.secondAvgE1RM}.`,
-    };
-  }, [strengthLeader]);
-
-  const aiHeadline = useMemo(() => {
-    if (completedSets.length === 0) return "Start building your training signal";
-
-    if (daysSinceLastWorkout !== null && daysSinceLastWorkout >= 3) {
-      return "You’re ready for a clean comeback session";
-    }
-
-    if (mostUndertrainedBodyPart && mostUndertrainedBodyPart.gap >= 6) {
-      return `${mostUndertrainedBodyPart.lowest.bodyPart} should be your next focus`;
-    }
-
-    if (currentStreak >= 3 && volumeMomentum.deltaPct >= 0) {
-      return "Momentum is building";
-    }
-
-    if (volumeMomentum.deltaPct <= -15) {
-      return "Your output dipped this week";
-    }
-
-    return "Your training is moving, but it needs clearer direction";
-  }, [
-    completedSets.length,
-    daysSinceLastWorkout,
-    mostUndertrainedBodyPart,
-    currentStreak,
-    volumeMomentum.deltaPct,
-  ]);
-
-  const nextTrainingTarget = useMemo(() => {
-    if (completedSets.length === 0) {
-      return {
-        title: "Start your first session",
-        detail:
-          "Once you log full workouts, ReSpawn will start coaching your next target automatically.",
-        cta: "Go To Today",
-      };
-    }
-
-    if (daysSinceLastWorkout !== null && daysSinceLastWorkout >= 3) {
-      return {
-        title: "Train today",
-        detail: "You’ve had enough recovery time. Keep it simple and get momentum back.",
-        cta: "Start Workout",
-      };
-    }
-
-    if (mostUndertrainedBodyPart && mostUndertrainedBodyPart.gap >= 6) {
-      return {
-        title: `Train ${mostUndertrainedBodyPart.lowest.bodyPart}`,
-        detail: `${mostUndertrainedBodyPart.lowest.bodyPart} is the clearest opportunity in your recent split.`,
-        cta: `Build ${mostUndertrainedBodyPart.lowest.bodyPart} Workout`,
-      };
-    }
-
-    if (repBias === "Strength") {
-      return {
-        title: "Stay on strength",
-        detail: "Your rep profile is heavier right now. Keep the main lifts clean and progressive.",
-        cta: "Generate Next Session",
-      };
-    }
-
-    if (repBias === "Hypertrophy") {
-      return {
-        title: "Keep pushing hypertrophy",
-        detail: "Your rep profile is in the muscle-building range. Stay focused on quality volume.",
-        cta: "Generate Next Session",
-      };
-    }
-
-    return {
-      title: "Keep the plan moving",
-      detail:
-        "There’s no major issue to solve right now. The next session matters more than more tweaking.",
-      cta: "Generate Next Session",
-    };
-  }, [completedSets.length, daysSinceLastWorkout, mostUndertrainedBodyPart, repBias]);
-
-  const coachFeed = useMemo<CoachFeedItem[]>(() => {
-    const items: CoachFeedItem[] = [];
-
-    if (currentStreak > 0) {
-      items.push({
-        title: "Consistency",
-        detail: `You are on a ${currentStreak}-day streak. Your best streak so far is ${bestStreak} days.`,
-        tone: currentStreak >= 3 ? "good" : "neutral",
-      });
-    }
-
-    if (volumeMomentum.deltaPct >= 10) {
-      items.push({
-        title: "Volume trend",
-        detail: `Your last 7 days are up ${volumeMomentum.deltaPct}% versus the previous week.`,
-        tone: "good",
-      });
-    } else if (volumeMomentum.deltaPct <= -15) {
-      items.push({
-        title: "Volume trend",
-        detail: `Your last 7 days are down ${Math.abs(volumeMomentum.deltaPct)}% versus the previous week.`,
-        tone: "warn",
-      });
-    }
-
-    if (strongestEstimatedLift) {
-      items.push({
-        title: "Top lift",
-        detail: `${strongestEstimatedLift.name} is currently your top estimated strength expression at ${strongestEstimatedLift.e1rm}.`,
-        tone: "neutral",
-      });
-    }
-
-    if (bodyPartSummary[0]) {
-      items.push({
-        title: "Most emphasized area",
-        detail: `${bodyPartSummary[0].bodyPart} is leading your recent logged volume.`,
-        tone: "neutral",
-      });
-    }
-
-    return items.slice(0, 4);
-  }, [
-    currentStreak,
-    bestStreak,
-    volumeMomentum.deltaPct,
-    strongestEstimatedLift,
-    bodyPartSummary,
-  ]);
-
+  // Week chart is ALWAYS Mon–Sun
   const weeklyChartData = useMemo(() => {
     const days: { label: string; volume: number; active: boolean }[] = [];
 
-    for (let i = 6; i >= 0; i -= 1) {
-      const day = new Date(today);
-      day.setDate(today.getDate() - i);
+    for (let i = 0; i < 7; i += 1) {
+      const day = new Date(weekStart);
+      day.setDate(weekStart.getDate() + i);
       day.setHours(0, 0, 0, 0);
+
       const key = day.toISOString();
       const info = workoutDays.get(key);
 
@@ -801,11 +636,187 @@ export default function DashboardPage() {
     }
 
     return days;
-  }, [today, workoutDays]);
+  }, [weekStart, workoutDays]);
 
   const maxWeeklyVolume = useMemo(() => {
     return Math.max(1, ...weeklyChartData.map((d) => d.volume));
   }, [weeklyChartData]);
+
+  const performanceHighlight = useMemo(() => {
+    return pickPerformanceHighlight({
+      completedSets,
+      workoutsById,
+      weekStart,
+      weekEndExclusive,
+      today,
+      recentBodyPartSummary: weekBodyPartSummary.filter((x) => x.bodyPart !== "Other"),
+      workoutsThisWeek,
+      totalVolumeThisWeek,
+      uniqueExercises,
+    });
+  }, [
+    completedSets,
+    workoutsById,
+    weekStart,
+    weekEndExclusive,
+    today,
+    weekBodyPartSummary,
+    workoutsThisWeek,
+    totalVolumeThisWeek,
+    uniqueExercises,
+  ]);
+
+  // Simple “one suggestion” ranking
+  const candidateBodyParts = useMemo(() => ["Chest", "Back", "Legs", "Shoulders", "Arms"], []);
+
+  const rankedBodyParts = useMemo(() => {
+    const weekMap = new Map<string, BodyPartSummaryItem>();
+    for (const item of weekBodyPartSummary) weekMap.set(item.bodyPart, item);
+
+    return candidateBodyParts
+      .map((bodyPart) => {
+        const daysSince = getDaysSinceBodyPart(bodyPart);
+        const weekSets = weekMap.get(bodyPart)?.sets ?? 0;
+
+        let score = 0;
+        score += Math.min(daysSince, 7) * 2; // freshness
+        score -= weekSets * 1.6; // weekly emphasis
+        if (daysSince <= 1) score -= 12;
+        else if (daysSince <= 2) score -= 8;
+        if (currentStreak >= 3) score -= 3;
+
+        return { bodyPart, score };
+      })
+      .sort((a, b) => b.score - a.score);
+  }, [candidateBodyParts, weekBodyPartSummary, bodyPartLastTrained, today, currentStreak]);
+
+  const suggestionBodyPart = useMemo(() => rankedBodyParts[0]?.bodyPart ?? null, [rankedBodyParts]);
+
+  const recommendation = useMemo<Recommendation>(() => {
+    if (completedSets.length === 0) {
+      return {
+        title: "Start your first session",
+        detail:
+          "Log a few workouts and ReSpawn will start giving smarter next-session suggestions automatically.",
+        cta: "Go To Today",
+        mode: "train",
+        suggestedBodyPart: null,
+        readinessLabel: readiness.label,
+      };
+    }
+
+    if (currentStreak >= 4) {
+      return {
+        title: "Recovery Day",
+        detail:
+          "You’ve been consistent. A rest day helps you keep momentum without piling fatigue.",
+        cta: "Log Recovery Day",
+        mode: "rest",
+        suggestedBodyPart: null,
+        readinessLabel: "Needs Recovery",
+      };
+    }
+
+    if (currentStreak >= 3) {
+      return {
+        title: "Keep it lighter",
+        detail: suggestionBodyPart
+          ? `${suggestionBodyPart} is a solid next session based on this week’s balance.`
+          : "Keep your next session clean and lighter than usual.",
+        cta: suggestionBodyPart ? `Build ${suggestionBodyPart} Workout` : "Start Workout",
+        mode: "light",
+        suggestedBodyPart: suggestionBodyPart,
+        readinessLabel: readiness.label,
+      };
+    }
+
+    if (daysSinceLastWorkout !== null && daysSinceLastWorkout >= 3) {
+      return {
+        title: "Next session",
+        detail: suggestionBodyPart
+          ? `${suggestionBodyPart} is a good next session based on this week’s balance.`
+          : "Good day to train—keep it clean and build momentum.",
+        cta: suggestionBodyPart ? `Build ${suggestionBodyPart} Workout` : "Start Workout",
+        mode: "train",
+        suggestedBodyPart: suggestionBodyPart,
+        readinessLabel: "Fresh",
+      };
+    }
+
+    return {
+      title: "Next session",
+      detail: suggestionBodyPart
+        ? `${suggestionBodyPart} is a good next session based on this week’s balance.`
+        : "Pick a clean session and keep the week moving.",
+      cta: suggestionBodyPart ? `Build ${suggestionBodyPart} Workout` : "Generate Next Session",
+      mode: "train",
+      suggestedBodyPart: suggestionBodyPart,
+      readinessLabel: readiness.label,
+    };
+  }, [
+    completedSets.length,
+    currentStreak,
+    daysSinceLastWorkout,
+    suggestionBodyPart,
+    readiness.label,
+  ]);
+
+  const aiHeadline = useMemo(() => {
+    if (completedSets.length === 0) return "Start building your training signal";
+    if (recommendation.mode === "rest") return "Recovery keeps progress moving";
+    if (recommendation.mode === "light") return "Momentum is building";
+    return "Next workout suggestion";
+  }, [completedSets.length, recommendation.mode]);
+
+  // Coach Feed = Consistency → Performance → Motivation (no advice, no do/don’t)
+  const coachFeed = useMemo<CoachFeedItem[]>(() => {
+    const items: CoachFeedItem[] = [];
+
+    // 1) Consistency
+    if (completedSets.length === 0) {
+      items.push({
+        title: "Consistency",
+        detail: "Log a few workouts to unlock smarter insights.",
+        tone: "neutral",
+      });
+    } else if (currentStreak >= 3) {
+      items.push({
+        title: "Consistency",
+        detail: `${currentStreak}-day training streak. Momentum is building.`,
+        tone: "good",
+      });
+    } else if (workoutsThisWeek > 0) {
+      items.push({
+        title: "Consistency",
+        detail: `${workoutsThisWeek} workout${workoutsThisWeek === 1 ? "" : "s"} logged this week.`,
+        tone: workoutsThisWeek >= 3 ? "good" : "neutral",
+      });
+    } else {
+      items.push({
+        title: "Consistency",
+        detail: "Your next session is the one that restarts momentum.",
+        tone: "neutral",
+      });
+    }
+
+    // 2) Performance
+    items.push({
+      title: "Performance",
+      detail: performanceHighlight
+        ? performanceHighlight.detail
+        : "Repeat a few key lifts and ReSpawn will start calling out improvements.",
+      tone: "neutral",
+    });
+
+    // 3) Motivation
+    items.push({
+      title: "Momentum",
+      detail: "Every logged set sharpens your training signal. Keep stacking sessions.",
+      tone: "good",
+    });
+
+    return items.slice(0, 3);
+  }, [completedSets.length, currentStreak, workoutsThisWeek, performanceHighlight]);
 
   const bodyBalanceSegments = useMemo(() => {
     const items = bodyPartSummary.slice(0, 5);
@@ -853,10 +864,8 @@ export default function DashboardPage() {
       <main style={pageStyle}>
         <section style={heroCardStyle}>
           <p style={eyebrowStyle}>RESPAWN DASHBOARD</p>
-          <h1 style={heroTitleStyle}>Loading your AI coach...</h1>
-          <p style={heroSubStyle}>
-            Pulling your workouts, trends, balance, and next-step coaching.
-          </p>
+          <h1 style={heroTitleStyle}>Loading...</h1>
+          <p style={heroSubStyle}>Pulling your training history and highlights.</p>
         </section>
       </main>
     );
@@ -870,8 +879,7 @@ export default function DashboardPage() {
             <p style={eyebrowStyle}>RESPAWN DASHBOARD</p>
             <h1 style={heroTitleStyle}>{displayName}&apos;s AI Coach</h1>
             <p style={heroSubStyle}>
-              A cleaner read on your recent training, what is improving, what is slipping,
-              and what to do next.
+              A clean read on your consistency, performance highlights, and one next-session suggestion.
             </p>
 
             <div style={heroCoachFeedWrapStyle}>
@@ -879,7 +887,7 @@ export default function DashboardPage() {
 
               {coachFeed.length > 0 ? (
                 <div style={heroCoachFeedListStyle}>
-                  {coachFeed.slice(0, 3).map((item, index) => (
+                  {coachFeed.map((item, index) => (
                     <div
                       key={`${item.title}-${index}`}
                       style={{
@@ -913,11 +921,46 @@ export default function DashboardPage() {
         <div style={heroInsightCardStyle}>
           <div style={heroInsightLabelStyle}>Today&apos;s Coach Call</div>
           <div style={heroInsightTitleStyle}>{aiHeadline}</div>
-          <div style={heroInsightTextStyle}>{nextTrainingTarget.detail}</div>
+          <div style={heroInsightTextStyle}>{recommendation.detail}</div>
+
+          <div style={recommendationMetaRowStyle}>
+            <div
+              style={{
+                ...readinessPillStyle,
+                borderColor:
+                  readiness.tone === "good"
+                    ? "rgba(40, 199, 111, 0.24)"
+                    : readiness.tone === "warn"
+                    ? "rgba(255, 184, 0, 0.24)"
+                    : "rgba(255,255,255,0.10)",
+                color:
+                  readiness.tone === "good"
+                    ? "#7CFFB2"
+                    : readiness.tone === "warn"
+                    ? "#FFD66B"
+                    : "#d7d7d7",
+              }}
+            >
+              Readiness: {recommendation.readinessLabel}
+            </div>
+
+            <div style={metaHintStyle}>
+              Streak: <span style={metaHintStrongStyle}>{currentStreak}d</span>
+              {daysSinceLastWorkout !== null ? (
+                <>
+                  {" "}
+                  • Last workout:{" "}
+                  <span style={metaHintStrongStyle}>
+                    {daysSinceLastWorkout === 0 ? "Today" : `${daysSinceLastWorkout}d ago`}
+                  </span>
+                </>
+              ) : null}
+            </div>
+          </div>
 
           <div style={heroActionRowStyle}>
             <button onClick={primaryAction} style={primaryButtonStyle}>
-              {nextTrainingTarget.cta}
+              {recommendation.cta}
             </button>
             <button onClick={secondaryAction} style={secondaryButtonStyle}>
               View Workout Log
@@ -929,8 +972,8 @@ export default function DashboardPage() {
       <section style={dashboardGridStyle}>
         <section style={{ ...cardStyle, ...spanTwoStyle }}>
           <div style={sectionHeaderStyle}>
-            <h2 style={sectionTitleStyle}>7-Day Training Read</h2>
-            <span style={sectionBadgeStyle}>Volume by day</span>
+            <h2 style={sectionTitleStyle}>This Week (Mon–Sun)</h2>
+            <span style={sectionBadgeStyle}>Pattern</span>
           </div>
 
           <div style={weeklyChartStyle}>
@@ -945,50 +988,19 @@ export default function DashboardPage() {
                         height: `${day.active ? heightPct : 8}%`,
                         background: day.active
                           ? "linear-gradient(180deg, #ff7a7a 0%, #ff4d4d 100%)"
-                          : "#2a2a2a",
+                          : "#202020",
                       }}
                     />
                   </div>
-                  <span style={weeklyBarLabelStyle}>{day.label.slice(0, 1)}</span>
+                  <span style={weeklyBarLabelStyle}>{day.label.slice(0, 2)}</span>
                 </div>
               );
             })}
           </div>
 
           <p style={cardFootnoteStyle}>
-            This makes it easier to see whether you are actually training consistently or just had one big day.
+            Fixed week view (Mon–Sun). Older days drop off automatically when the week changes.
           </p>
-        </section>
-
-        <section style={cardStyle}>
-          <div style={sectionHeaderStyle}>
-            <h2 style={sectionTitleStyle}>Why Strength Changed</h2>
-          </div>
-
-          <div style={reasonHeadlineStyle}>{strengthWhy.headline}</div>
-          <div style={reasonTextStyle}>{strengthWhy.detail}</div>
-
-          {strengthLeader ? (
-            <div style={reasonMiniGridStyle}>
-              <div style={reasonMiniCardStyle}>
-                <span style={reasonMiniLabelStyle}>Main Lift</span>
-                <span style={reasonMiniValueStyle}>{strengthLeader.name}</span>
-              </div>
-              <div style={reasonMiniCardStyle}>
-                <span style={reasonMiniLabelStyle}>Latest Set</span>
-                <span style={reasonMiniValueStyle}>
-                  {strengthLeader.lastWeight} × {strengthLeader.lastReps}
-                </span>
-              </div>
-              <div style={reasonMiniCardStyle}>
-                <span style={reasonMiniLabelStyle}>Trend</span>
-                <span style={reasonMiniValueStyle}>
-                  {strengthLeader.trendPct >= 0 ? "+" : ""}
-                  {strengthLeader.trendPct}%
-                </span>
-              </div>
-            </div>
-          ) : null}
         </section>
 
         <section style={cardStyle}>
@@ -1016,12 +1028,7 @@ export default function DashboardPage() {
                 {bodyBalanceSegments.segments.map((segment) => (
                   <div key={segment.bodyPart} style={legendRowStyle}>
                     <div style={legendLeftStyle}>
-                      <span
-                        style={{
-                          ...legendDotStyle,
-                          background: segment.color,
-                        }}
-                      />
+                      <span style={{ ...legendDotStyle, background: segment.color }} />
                       <span style={legendNameStyle}>{segment.bodyPart}</span>
                     </div>
                     <span style={legendValueStyle}>
@@ -1036,82 +1043,16 @@ export default function DashboardPage() {
           )}
         </section>
 
-        <section style={{ ...cardStyle, ...spanTwoStyle }}>
-          <div style={sectionHeaderStyle}>
-            <h2 style={sectionTitleStyle}>Strength Progress</h2>
-            <span style={sectionBadgeStyle}>Your strongest signals</span>
-          </div>
-
-          {strengthCards.length > 0 ? (
-            <div style={strengthGridStyle}>
-              {strengthCards.map((card) => (
-                <div key={card.label} style={strengthCardStyle}>
-                  <div style={strengthCardLabelStyle}>{card.label}</div>
-                  <div style={strengthCardValueStyle}>{card.value}</div>
-                  <div style={strengthCardSubStyle}>{card.sub}</div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p style={mutedStyle}>
-              Log a few real sets with weight and reps, and your strength dashboard will come alive.
-            </p>
-          )}
-        </section>
-
-        <section style={{ ...cardStyle, ...spanTwoStyle }}>
-          <div style={sectionHeaderStyle}>
-            <h2 style={sectionTitleStyle}>Lift Intelligence</h2>
-            <span style={sectionBadgeStyle}>Repeated lifts only</span>
-          </div>
-
-          {liftInsights.length > 0 ? (
-            <div style={liftGridStyle}>
-              {liftInsights.map((lift) => (
-                <div key={lift.name} style={liftCardStyle}>
-                  <div style={liftTopRowStyle}>
-                    <div>
-                      <div style={liftNameStyle}>{lift.name}</div>
-                      <div style={liftBodyPartStyle}>{lift.bodyPart}</div>
-                    </div>
-
-                    <div
-                      style={{
-                        ...trendPillStyle,
-                        color: lift.trendPct >= 0 ? "#7CFFB2" : "#FFB1B1",
-                      }}
-                    >
-                      {lift.trendPct >= 0 ? "+" : ""}
-                      {lift.trendPct}%
-                    </div>
-                  </div>
-
-                  <div style={liftBigStatStyle}>{lift.bestE1RM} est. 1RM</div>
-                  <div style={liftSubLineStyle}>
-                    Latest: {lift.lastWeight || "--"} × {lift.lastReps || "--"}
-                  </div>
-                  <div style={liftSubLineStyle}>Recent avg: {lift.secondAvgE1RM}</div>
-                  <div style={liftSubLineStyle}>{lift.timesLogged} logged sets</div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p style={mutedStyle}>
-              Repeat the same lifts a few times and ReSpawn will start showing meaningful trends here.
-            </p>
-          )}
-        </section>
-
         <section style={cardStyle}>
           <div style={sectionHeaderStyle}>
             <h2 style={sectionTitleStyle}>Next Training Target</h2>
           </div>
 
-          <div style={nextTargetTitleStyle}>{nextTrainingTarget.title}</div>
-          <div style={nextTargetTextStyle}>{nextTrainingTarget.detail}</div>
+          <div style={nextTargetTitleStyle}>{recommendation.title}</div>
+          <div style={nextTargetTextStyle}>{recommendation.detail}</div>
 
           <button onClick={primaryAction} style={smallPrimaryButtonStyle}>
-            {nextTrainingTarget.cta}
+            {recommendation.cta}
           </button>
         </section>
 
@@ -1122,30 +1063,23 @@ export default function DashboardPage() {
 
           <div style={statsGridStyle}>
             <div style={miniStatBoxStyle}>
-              <span style={miniStatLabelStyle}>Last 30 Days</span>
+              <span style={miniStatLabelStyle}>Workouts (30d)</span>
               <span style={miniStatValueStyle}>{workoutsLast30}</span>
             </div>
 
             <div style={miniStatBoxStyle}>
-              <span style={miniStatLabelStyle}>Sets This Week</span>
-              <span style={miniStatValueStyle}>{totalSetsThisWeek}</span>
+              <span style={miniStatLabelStyle}>Workouts (week)</span>
+              <span style={miniStatValueStyle}>{workoutsThisWeek}</span>
             </div>
 
             <div style={miniStatBoxStyle}>
-              <span style={miniStatLabelStyle}>Weekly Volume</span>
-              <span style={miniStatValueStyleSmall}>
-                {Math.round(totalVolumeThisWeek).toLocaleString()}
-              </span>
+              <span style={miniStatLabelStyle}>Sets (week)</span>
+              <span style={miniStatValueStyle}>{totalSetsThisWeek}</span>
             </div>
 
             <div style={miniStatBoxStyle}>
               <span style={miniStatLabelStyle}>Unique Exercises</span>
               <span style={miniStatValueStyle}>{uniqueExercises}</span>
-            </div>
-
-            <div style={miniStatBoxStyle}>
-              <span style={miniStatLabelStyle}>Tracked Workouts</span>
-              <span style={miniStatValueStyle}>{trainingWorkouts.length}</span>
             </div>
 
             <div style={miniStatBoxStyle}>
@@ -1156,11 +1090,6 @@ export default function DashboardPage() {
             <div style={miniStatBoxStyle}>
               <span style={miniStatLabelStyle}>Lifetime Volume</span>
               <span style={miniStatValueStyleSmall}>{formatCompact(lifetimeVolume)}</span>
-            </div>
-
-            <div style={miniStatBoxStyle}>
-              <span style={miniStatLabelStyle}>Rep Bias</span>
-              <span style={miniStatValueStyleSmall}>{repBias}</span>
             </div>
 
             <div style={miniStatBoxStyle}>
@@ -1181,43 +1110,12 @@ export default function DashboardPage() {
             </div>
 
             <div style={miniStatBoxStyle}>
-              <span style={miniStatLabelStyle}>Volume vs Last Week</span>
-              <span style={miniStatValueStyle}>
-                {volumeMomentum.deltaPct >= 0 ? "+" : ""}
-                {volumeMomentum.deltaPct}%
+              <span style={miniStatLabelStyle}>Week Volume</span>
+              <span style={miniStatValueStyleSmall}>
+                {Math.round(totalVolumeThisWeek).toLocaleString()}
               </span>
             </div>
           </div>
-        </section>
-
-        <section style={{ ...cardStyle, ...spanTwoStyle }}>
-          <div style={sectionHeaderStyle}>
-            <h2 style={sectionTitleStyle}>Coach Feed</h2>
-          </div>
-
-          {coachFeed.length > 0 ? (
-            <div style={feedListStyle}>
-              {coachFeed.map((item, index) => (
-                <div
-                  key={`${item.title}-${index}`}
-                  style={{
-                    ...feedCardStyle,
-                    border:
-                      item.tone === "good"
-                        ? "1px solid rgba(40, 199, 111, 0.22)"
-                        : item.tone === "warn"
-                        ? "1px solid rgba(255, 184, 0, 0.22)"
-                        : "1px solid #252525",
-                  }}
-                >
-                  <div style={feedTitleStyle}>{item.title}</div>
-                  <div style={feedDetailStyle}>{item.detail}</div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p style={mutedStyle}>No coaching signals yet. Keep logging training.</p>
-          )}
         </section>
       </section>
 
@@ -1226,12 +1124,15 @@ export default function DashboardPage() {
   );
 }
 
+/* ------------------ STYLES ------------------ */
+
 const pageStyle: CSSProperties = {
   minHeight: "100vh",
   background: "linear-gradient(180deg, #050505 0%, #0a0a0a 42%, #111111 100%)",
   color: "#ffffff",
-  padding: "24px 18px 120px",
+  padding: "20px 14px 120px",
   fontFamily: "sans-serif",
+  overflowX: "hidden",
 };
 
 const heroCardStyle: CSSProperties = {
@@ -1403,9 +1304,38 @@ const smallPrimaryButtonStyle: CSSProperties = {
   width: "100%",
 };
 
+const recommendationMetaRowStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  flexWrap: "wrap",
+  gap: "10px",
+  marginTop: "12px",
+};
+
+const readinessPillStyle: CSSProperties = {
+  borderRadius: "999px",
+  border: "1px solid rgba(255,255,255,0.10)",
+  padding: "8px 12px",
+  fontSize: "12px",
+  fontWeight: 900,
+  background: "rgba(255,255,255,0.05)",
+};
+
+const metaHintStyle: CSSProperties = {
+  color: "#bdbdbd",
+  fontSize: "12px",
+  fontWeight: 700,
+};
+
+const metaHintStrongStyle: CSSProperties = {
+  color: "#ffffff",
+  fontWeight: 900,
+};
+
 const dashboardGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
   gap: "16px",
 };
 
@@ -1415,10 +1345,12 @@ const cardStyle: CSSProperties = {
   borderRadius: "22px",
   padding: "20px",
   boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
+  width: "100%",
+  boxSizing: "border-box",
 };
 
 const spanTwoStyle: CSSProperties = {
-  gridColumn: "span 2",
+  gridColumn: "1 / -1", // mobile-safe: full width without creating implicit columns
 };
 
 const sectionHeaderStyle: CSSProperties = {
@@ -1446,10 +1378,10 @@ const sectionBadgeStyle: CSSProperties = {
 };
 
 const weeklyChartStyle: CSSProperties = {
-  height: "220px",
+  height: "180px",
   display: "grid",
-  gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
-  gap: "14px",
+  gridTemplateColumns: "repeat(7, 1fr)",
+  gap: "8px",
   alignItems: "end",
   marginTop: "8px",
 };
@@ -1465,12 +1397,12 @@ const weeklyBarWrapStyle: CSSProperties = {
 const weeklyBarTrackStyle: CSSProperties = {
   height: "100%",
   width: "100%",
-  borderRadius: "14px",
-  background: "#1a1a1a",
-  border: "1px solid #262626",
+  borderRadius: "12px",
+  background: "#171717",
+  border: "1px solid #252525",
   display: "flex",
   alignItems: "flex-end",
-  padding: "6px",
+  padding: "4px",
   boxSizing: "border-box",
 };
 
@@ -1485,47 +1417,17 @@ const weeklyBarLabelStyle: CSSProperties = {
   fontWeight: 700,
 };
 
-const reasonHeadlineStyle: CSSProperties = {
-  color: "#ffffff",
-  fontSize: "22px",
-  fontWeight: 900,
-  lineHeight: 1.2,
-};
-
-const reasonTextStyle: CSSProperties = {
-  color: "#cbcbcb",
-  fontSize: "14px",
-  lineHeight: 1.5,
-  marginTop: "10px",
-};
-
-const reasonMiniGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-  gap: "10px",
-  marginTop: "16px",
-};
-
-const reasonMiniCardStyle: CSSProperties = {
-  background: "#171717",
-  border: "1px solid #252525",
-  borderRadius: "14px",
-  padding: "12px",
-  display: "flex",
-  flexDirection: "column",
-  gap: "6px",
-};
-
-const reasonMiniLabelStyle: CSSProperties = {
-  color: "#a6a6a6",
+const cardFootnoteStyle: CSSProperties = {
+  color: "#8d8d8d",
   fontSize: "12px",
+  marginTop: "12px",
+  marginBottom: 0,
 };
 
-const reasonMiniValueStyle: CSSProperties = {
-  color: "#ffffff",
-  fontSize: "14px",
-  fontWeight: 800,
-  lineHeight: 1.35,
+const mutedStyle: CSSProperties = {
+  color: "#a5a5a5",
+  margin: "6px 0",
+  lineHeight: 1.5,
 };
 
 const donutWrapStyle: CSSProperties = {
@@ -1606,98 +1508,6 @@ const legendValueStyle: CSSProperties = {
   fontSize: "13px",
 };
 
-const strengthGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: "12px",
-};
-
-const strengthCardStyle: CSSProperties = {
-  background: "linear-gradient(135deg, rgba(255,26,26,0.08), rgba(255,255,255,0.02))",
-  border: "1px solid rgba(255,255,255,0.06)",
-  borderRadius: "18px",
-  padding: "16px",
-};
-
-const strengthCardLabelStyle: CSSProperties = {
-  color: "#ff9b9b",
-  fontSize: "11px",
-  fontWeight: 800,
-  letterSpacing: "0.06em",
-  textTransform: "uppercase",
-  marginBottom: "8px",
-};
-
-const strengthCardValueStyle: CSSProperties = {
-  color: "#ffffff",
-  fontSize: "30px",
-  fontWeight: 900,
-  lineHeight: 1.1,
-};
-
-const strengthCardSubStyle: CSSProperties = {
-  color: "#bbbbbb",
-  fontSize: "13px",
-  lineHeight: 1.4,
-  marginTop: "8px",
-};
-
-const liftGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: "12px",
-};
-
-const liftCardStyle: CSSProperties = {
-  background: "linear-gradient(135deg, rgba(255,26,26,0.08), rgba(255,255,255,0.02))",
-  border: "1px solid rgba(255,255,255,0.06)",
-  borderRadius: "16px",
-  padding: "16px",
-};
-
-const liftTopRowStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "flex-start",
-  gap: "10px",
-  marginBottom: "10px",
-};
-
-const liftNameStyle: CSSProperties = {
-  color: "#ffffff",
-  fontSize: "16px",
-  fontWeight: 800,
-};
-
-const liftBodyPartStyle: CSSProperties = {
-  color: "#a8a8a8",
-  fontSize: "12px",
-  marginTop: "4px",
-};
-
-const trendPillStyle: CSSProperties = {
-  fontSize: "12px",
-  fontWeight: 900,
-  background: "rgba(255,255,255,0.06)",
-  border: "1px solid rgba(255,255,255,0.08)",
-  borderRadius: "999px",
-  padding: "6px 10px",
-  whiteSpace: "nowrap",
-};
-
-const liftBigStatStyle: CSSProperties = {
-  color: "#ffffff",
-  fontSize: "20px",
-  fontWeight: 900,
-  marginBottom: "8px",
-};
-
-const liftSubLineStyle: CSSProperties = {
-  color: "#c7c7c7",
-  fontSize: "13px",
-  marginTop: "6px",
-};
-
 const nextTargetTitleStyle: CSSProperties = {
   color: "#ffffff",
   fontSize: "24px",
@@ -1714,7 +1524,7 @@ const nextTargetTextStyle: CSSProperties = {
 
 const statsGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
   gap: "10px",
 };
 
@@ -1744,43 +1554,6 @@ const miniStatValueStyleSmall: CSSProperties = {
   fontWeight: 800,
   fontSize: "14px",
   lineHeight: 1.35,
-};
-
-const feedListStyle: CSSProperties = {
-  display: "grid",
-  gap: "12px",
-};
-
-const feedCardStyle: CSSProperties = {
-  background: "#171717",
-  borderRadius: "16px",
-  padding: "14px",
-};
-
-const feedTitleStyle: CSSProperties = {
-  color: "#ffffff",
-  fontWeight: 800,
-  fontSize: "15px",
-};
-
-const feedDetailStyle: CSSProperties = {
-  color: "#bbbbbb",
-  fontSize: "13px",
-  marginTop: "6px",
-  lineHeight: 1.45,
-};
-
-const cardFootnoteStyle: CSSProperties = {
-  color: "#8d8d8d",
-  fontSize: "12px",
-  marginTop: "12px",
-  marginBottom: 0,
-};
-
-const mutedStyle: CSSProperties = {
-  color: "#a5a5a5",
-  margin: "6px 0",
-  lineHeight: 1.5,
 };
 
 const statusStyle: CSSProperties = {
