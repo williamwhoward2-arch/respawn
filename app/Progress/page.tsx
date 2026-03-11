@@ -72,6 +72,16 @@ type WorkoutWithStats = Workout & {
   autoNamed: boolean;
 };
 
+type AIInsights = {
+  heroHeadline: string;
+  heroSummary: string;
+  topWin: string;
+  topConcern: string;
+  nextBestMove: string;
+  volumeCallout: string;
+  bodyPartCallout: string;
+};
+
 function toNumber(value: string | number | null | undefined): number {
   if (value === null || value === undefined || value === "") return 0;
   const n = Number(value);
@@ -272,8 +282,10 @@ function getWorkoutDisplayName(params: {
 
 function VolumeTrendChart({
   data,
+  callout,
 }: {
   data: { label: string; value: number; sets: number }[];
+  callout?: string;
 }) {
   if (!data.length) {
     return <p style={mutedStyle}>Not enough workout data yet.</p>;
@@ -297,6 +309,7 @@ function VolumeTrendChart({
         <div>
           <div style={chartTitleStyle}>Recent Volume Trend</div>
           <div style={chartSubtitleStyle}>Last {data.length} workouts</div>
+          {callout ? <div style={chartCalloutStyle}>{callout}</div> : null}
         </div>
         <div style={chartBadgeGreenStyle}>Progression</div>
       </div>
@@ -349,8 +362,10 @@ function VolumeTrendChart({
 
 function BodyPartVolumeChart({
   data,
+  callout,
 }: {
   data: { label: string; value: number; sets: number }[];
+  callout?: string;
 }) {
   if (!data.length) {
     return <p style={mutedStyle}>No body-part data yet.</p>;
@@ -364,6 +379,7 @@ function BodyPartVolumeChart({
         <div>
           <div style={chartTitleStyle}>Body Part Volume Split</div>
           <div style={chartSubtitleStyle}>Recent workload distribution</div>
+          {callout ? <div style={chartCalloutStyle}>{callout}</div> : null}
         </div>
         <div style={chartBadgeGreenStyle}>Balanced</div>
       </div>
@@ -408,6 +424,8 @@ export default function ProgressPage() {
   const [status, setStatus] = useState("");
   const [deletingWorkoutId, setDeletingWorkoutId] = useState<number | null>(null);
   const [selectedWorkoutId, setSelectedWorkoutId] = useState<number | null>(null);
+  const [aiInsights, setAiInsights] = useState<AIInsights | null>(null);
+  const [aiInsightsLoading, setAiInsightsLoading] = useState(false);
   const reportRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -581,10 +599,7 @@ export default function ProgressPage() {
         0
       );
 
-      const cardioMiles = workoutCardio.reduce(
-        (sum, entry) => sum + toNumber(entry.miles),
-        0
-      );
+      const cardioMiles = workoutCardio.reduce((sum, entry) => sum + toNumber(entry.miles), 0);
 
       const workoutName = getWorkoutDisplayName({
         workout,
@@ -703,26 +718,26 @@ export default function ProgressPage() {
     const bestWorkout =
       [...recentWorkouts].sort((a, b) => b.totalVolume - a.totalVolume)[0] ?? null;
 
-    const aiInsights: string[] = [];
+    const aiInsightsFallback: string[] = [];
     const repTips: string[] = [];
     const didYouKnow: string[] = [];
 
     if (recent14Workouts >= 4) {
-      aiInsights.push(
+      aiInsightsFallback.push(
         "You’ve trained frequently enough in the last 14 days to build real momentum. Consistency is starting to compound."
       );
     } else if (recent14Workouts >= 2) {
-      aiInsights.push(
+      aiInsightsFallback.push(
         "Your recent training frequency is enough to maintain progress, but one extra session per week would likely improve results."
       );
     } else {
-      aiInsights.push(
+      aiInsightsFallback.push(
         "Your progress will sharpen once weekly frequency becomes more repeatable. Right now, consistency is the biggest lever."
       );
     }
 
     if (recent14CardioEntries > 0) {
-      aiInsights.push(
+      aiInsightsFallback.push(
         `You also logged ${recent14CardioEntries} cardio ${
           recent14CardioEntries === 1 ? "entry" : "entries"
         } in the last 14 days, totaling ${formatDuration(recent14CardioDuration)} of conditioning work.`
@@ -730,13 +745,13 @@ export default function ProgressPage() {
     }
 
     if (mostUsedExercise) {
-      aiInsights.push(
+      aiInsightsFallback.push(
         `${mostUsedExercise.name} is currently your most logged movement. That usually means it is either a priority lift or a comfort-zone staple.`
       );
     }
 
     if (strongestExercise) {
-      aiInsights.push(
+      aiInsightsFallback.push(
         `${strongestExercise.name} currently leads your strength profile based on estimated 1RM.`
       );
     }
@@ -746,7 +761,7 @@ export default function ProgressPage() {
       const weakest = bodyPartSummary[bodyPartSummary.length - 1];
 
       if (strongest && weakest && strongest.bodyPart !== weakest.bodyPart) {
-        aiInsights.push(
+        aiInsightsFallback.push(
           `${strongest.bodyPart} is getting the most recent training attention, while ${weakest.bodyPart.toLowerCase()} is trailing behind.`
         );
       }
@@ -866,7 +881,7 @@ export default function ProgressPage() {
       strongestExercise,
       mostUsedExercise,
       bestWorkout,
-      aiInsights,
+      aiInsightsFallback,
       repTips,
       didYouKnow,
       story: storyParts.join(" "),
@@ -894,6 +909,70 @@ export default function ProgressPage() {
       bodyPartVolumeBars,
     };
   }, [computed]);
+
+  useEffect(() => {
+    if (!workouts.length && !sets.length && !cardio.length) return;
+
+    const payload = {
+      goal: computed.goal,
+      bodyweight: computed.bodyweight,
+      recent14Workouts: computed.recent14Workouts,
+      recent14CardioEntries: computed.recent14CardioEntries,
+      recent14CardioDuration: computed.recent14CardioDuration,
+      totalVolume: computed.totalVolume,
+      avgReps: computed.avgReps,
+      avgWeight: computed.avgWeight,
+      avgWorkoutDuration: computed.avgWorkoutDuration,
+      repRangeSummary: computed.repRangeSummary,
+      strongestExercise: computed.strongestExercise,
+      mostUsedExercise: computed.mostUsedExercise,
+      bestWorkout: computed.bestWorkout
+        ? {
+            name: computed.bestWorkout.displayName,
+            totalVolume: computed.bestWorkout.totalVolume,
+            created_at: computed.bestWorkout.created_at,
+          }
+        : null,
+      bodyPartSummary: computed.bodyPartSummary.slice(0, 6),
+      recentVolumeTrend: chartData.recentVolumeTrend,
+    };
+
+    let cancelled = false;
+
+    async function loadAIInsights() {
+      try {
+        setAiInsightsLoading(true);
+
+        const res = await fetch("/api/progress-insights", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+          throw new Error("Failed to fetch AI insights");
+        }
+
+        const data = (await res.json()) as AIInsights;
+
+        if (!cancelled) {
+          setAiInsights(data);
+        }
+      } catch (error) {
+        console.error("AI insights fetch failed:", error);
+      } finally {
+        if (!cancelled) {
+          setAiInsightsLoading(false);
+        }
+      }
+    }
+
+    void loadAIInsights();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [workouts.length, sets.length, cardio.length, computed, chartData]);
 
   const selectedWorkoutReport = useMemo(() => {
     if (!selectedWorkoutId) return null;
@@ -1077,8 +1156,10 @@ export default function ProgressPage() {
         </p>
 
         <div style={heroReviewCardStyle}>
-          <div style={heroReviewLabelStyle}>AI review summary</div>
-          <div style={heroReviewTextStyle}>{computed.story}</div>
+          <div style={heroReviewLabelStyle}>
+            {aiInsights?.heroHeadline || (aiInsightsLoading ? "Building your AI review" : "AI review summary")}
+          </div>
+          <div style={heroReviewTextStyle}>{aiInsights?.heroSummary || computed.story}</div>
         </div>
 
         <div style={heroStatsRowStyle}>
@@ -1107,11 +1188,17 @@ export default function ProgressPage() {
 
       <section style={twoColGridStyle}>
         <section style={cardStyle}>
-          <VolumeTrendChart data={chartData.recentVolumeTrend} />
+          <VolumeTrendChart
+            data={chartData.recentVolumeTrend}
+            callout={aiInsights?.volumeCallout}
+          />
         </section>
 
         <section style={cardStyle}>
-          <BodyPartVolumeChart data={chartData.bodyPartVolumeBars} />
+          <BodyPartVolumeChart
+            data={chartData.bodyPartVolumeBars}
+            callout={aiInsights?.bodyPartCallout}
+          />
         </section>
       </section>
 
@@ -1153,7 +1240,7 @@ export default function ProgressPage() {
                           onClick={() => handleDeleteWorkout(workout.id)}
                           disabled={deletingWorkoutId === workout.id}
                           style={{
-                            ...deleteWorkoutButtonStyle,
+                                                        ...deleteWorkoutButtonStyle,
                             opacity: deletingWorkoutId === workout.id ? 0.6 : 1,
                             cursor:
                               deletingWorkoutId === workout.id ? "not-allowed" : "pointer",
@@ -1321,9 +1408,7 @@ export default function ProgressPage() {
                         <div style={exerciseReportTopStyle}>
                           <div>
                             <div style={exerciseNameStyle}>{titleCase(entry.method)}</div>
-                            <div style={exerciseMetaStyle}>
-                              Entry {entry.entry_number || 1}
-                            </div>
+                            <div style={exerciseMetaStyle}>Entry {entry.entry_number || 1}</div>
                           </div>
 
                           <div style={exerciseRightStyle}>
@@ -1395,18 +1480,31 @@ export default function ProgressPage() {
             <h2 style={sectionTitle}>AI Insights</h2>
           </div>
 
-          {computed.aiInsights.length > 0 ? (
-            <div style={insightListStyle}>
-              {computed.aiInsights.map((item, index) => (
-                <div key={index} style={insightCardStyle}>
-                  <div style={insightCardLabelStyle}>Insight</div>
-                  <div style={insightCardTextStyle}>{item}</div>
-                </div>
-              ))}
+          <div style={insightListStyle}>
+            <div style={insightCardStyle}>
+              <div style={insightCardLabelStyle}>Top Win</div>
+              <div style={insightCardTextStyle}>
+                {aiInsights?.topWin || computed.aiInsightsFallback[0] || "Keep logging sessions."}
+              </div>
             </div>
-          ) : (
-            <p style={mutedStyle}>Log more sessions and your insights will get sharper.</p>
-          )}
+
+            <div style={insightCardStyle}>
+              <div style={insightCardLabelStyle}>Top Concern</div>
+              <div style={insightCardTextStyle}>
+                {aiInsights?.topConcern ||
+                  computed.aiInsightsFallback[1] ||
+                  "Your data is still building."}
+              </div>
+            </div>
+
+            <div style={insightCardStyle}>
+              <div style={insightCardLabelStyle}>Next Best Move</div>
+              <div style={insightCardTextStyle}>
+                {aiInsights?.nextBestMove ||
+                  "Stay consistent, repeat key lifts, and keep training focused."}
+              </div>
+            </div>
+          </div>
         </section>
 
         <section style={cardStyle}>
@@ -2109,6 +2207,14 @@ const chartSubtitleStyle: CSSProperties = {
   color: "#9f9f9f",
   fontSize: "13px",
   marginTop: "4px",
+};
+
+const chartCalloutStyle: CSSProperties = {
+  color: "#d8f6df",
+  fontSize: "13px",
+  lineHeight: 1.45,
+  marginTop: "8px",
+  maxWidth: "520px",
 };
 
 const chartBadgeGreenStyle: CSSProperties = {

@@ -149,6 +149,7 @@ export default function DashboardPage() {
       setStatus(`Error signing out: ${error.message}`);
       return;
     }
+
     router.replace("/login");
   }
 
@@ -164,8 +165,8 @@ export default function DashboardPage() {
   }
 
   function startOfWeekMonday(d: Date) {
-    const day = d.getDay(); // 0=Sun, 1=Mon, ...
-    const diff = (day + 6) % 7; // Monday-start
+    const day = d.getDay();
+    const diff = (day + 6) % 7;
     const start = new Date(d);
     start.setDate(d.getDate() - diff);
     start.setHours(0, 0, 0, 0);
@@ -225,7 +226,6 @@ export default function DashboardPage() {
 
     const candidates: Candidate[] = [];
 
-    // A) Best set THIS WEEK (Mon–Sun)
     let bestWeekSet: { name: string; weight: number; reps: number; e1rm: number } | null = null;
 
     for (const s of completedSets) {
@@ -252,7 +252,6 @@ export default function DashboardPage() {
       });
     }
 
-    // B) Improvement on a repeated lift (last vs previous), not week-bounded but meaningful
     const setsByExercise = new Map<string, WorkoutSet[]>();
     for (const s of completedSets) {
       const name = (s.exercise_name ?? "").trim();
@@ -262,7 +261,8 @@ export default function DashboardPage() {
       setsByExercise.get(key)!.push(s);
     }
 
-    let bestImprovement: { name: string; deltaPct: number; prev: number; curr: number } | null = null;
+    let bestImprovement: { name: string; deltaPct: number; prev: number; curr: number } | null =
+      null;
 
     for (const [key, arr] of setsByExercise.entries()) {
       if (arr.length < 4) continue;
@@ -299,7 +299,6 @@ export default function DashboardPage() {
       });
     }
 
-    // C) Most trained area THIS WEEK (Mon–Sun)
     if (recentBodyPartSummary.length > 0) {
       const leader = [...recentBodyPartSummary].sort((a, b) => b.sets - a.sets)[0];
       if (leader && leader.sets >= 6) {
@@ -310,7 +309,6 @@ export default function DashboardPage() {
       }
     }
 
-    // D) Weekly consistency milestone
     if (workoutsThisWeek >= 4) {
       candidates.push({
         score: 140 + workoutsThisWeek * 4,
@@ -318,7 +316,6 @@ export default function DashboardPage() {
       });
     }
 
-    // E) Output milestone (celebration only)
     if (totalVolumeThisWeek >= 25000) {
       candidates.push({
         score: 135 + Math.min(40, Math.round(totalVolumeThisWeek / 20000)),
@@ -326,7 +323,6 @@ export default function DashboardPage() {
       });
     }
 
-    // F) Variety milestone
     if (uniqueExercises >= 12) {
       candidates.push({
         score: 120 + Math.min(30, uniqueExercises),
@@ -340,8 +336,7 @@ export default function DashboardPage() {
     const topScore = sorted[0].score;
     const topPool = sorted.filter((c) => c.score >= topScore - 10).slice(0, 4);
 
-    // Rotate among top items daily so it feels alive
-    const dayKey = today.toISOString().slice(0, 10); // YYYY-MM-DD
+    const dayKey = today.toISOString().slice(0, 10);
     const pickIndex = topPool.length > 1 ? hashStringToInt(dayKey) % topPool.length : 0;
     const chosen = topPool[pickIndex] ?? sorted[0];
 
@@ -383,7 +378,6 @@ export default function DashboardPage() {
     });
   }, [sets, trainingWorkoutIds]);
 
-  // For streak + week view
   const workoutDays = useMemo(() => {
     const map = new Map<string, { count: number; volume: number }>();
 
@@ -536,7 +530,6 @@ export default function DashboardPage() {
     return unique.size;
   }, [completedSets]);
 
-  // Body Balance stays lifetime-ish (works well visually)
   const bodyPartSummary = useMemo<BodyPartSummaryItem[]>(() => {
     const map = new Map<string, { sets: number; volume: number }>();
 
@@ -557,7 +550,6 @@ export default function DashboardPage() {
       .sort((a, b) => b.sets - a.sets);
   }, [completedSets]);
 
-  // Week summary for highlights + recommendation scoring
   const weekBodyPartSummary = useMemo<BodyPartSummaryItem[]>(() => {
     const map = new Map<string, { sets: number; volume: number }>();
 
@@ -611,12 +603,12 @@ export default function DashboardPage() {
     if (completedSets.length === 0) return { label: "New Signal", tone: "neutral" as const };
     if (currentStreak >= 4) return { label: "Needs Recovery", tone: "warn" as const };
     if (currentStreak >= 3) return { label: "Moderate Fatigue", tone: "neutral" as const };
-    if (daysSinceLastWorkout !== null && daysSinceLastWorkout >= 3)
+    if (daysSinceLastWorkout !== null && daysSinceLastWorkout >= 3) {
       return { label: "Fresh", tone: "good" as const };
+    }
     return { label: "Train Ready", tone: "good" as const };
   }, [completedSets.length, currentStreak, daysSinceLastWorkout]);
 
-  // Week chart is ALWAYS Mon–Sun
   const weeklyChartData = useMemo(() => {
     const days: { label: string; volume: number; active: boolean }[] = [];
 
@@ -666,8 +658,10 @@ export default function DashboardPage() {
     uniqueExercises,
   ]);
 
-  // Simple “one suggestion” ranking
-  const candidateBodyParts = useMemo(() => ["Chest", "Back", "Legs", "Shoulders", "Arms"], []);
+  const candidateBodyParts = useMemo(
+    () => ["Chest", "Back", "Legs", "Shoulders", "Arms"],
+    []
+  );
 
   const rankedBodyParts = useMemo(() => {
     const weekMap = new Map<string, BodyPartSummaryItem>();
@@ -679,8 +673,8 @@ export default function DashboardPage() {
         const weekSets = weekMap.get(bodyPart)?.sets ?? 0;
 
         let score = 0;
-        score += Math.min(daysSince, 7) * 2; // freshness
-        score -= weekSets * 1.6; // weekly emphasis
+        score += Math.min(daysSince, 7) * 2;
+        score -= weekSets * 1.6;
         if (daysSince <= 1) score -= 12;
         else if (daysSince <= 2) score -= 8;
         if (currentStreak >= 3) score -= 3;
@@ -688,7 +682,7 @@ export default function DashboardPage() {
         return { bodyPart, score };
       })
       .sort((a, b) => b.score - a.score);
-  }, [candidateBodyParts, weekBodyPartSummary, bodyPartLastTrained, today, currentStreak]);
+  }, [candidateBodyParts, weekBodyPartSummary, currentStreak]);
 
   const suggestionBodyPart = useMemo(() => rankedBodyParts[0]?.bodyPart ?? null, [rankedBodyParts]);
 
@@ -768,11 +762,9 @@ export default function DashboardPage() {
     return "Next workout suggestion";
   }, [completedSets.length, recommendation.mode]);
 
-  // Coach Feed = Consistency → Performance → Motivation (no advice, no do/don’t)
   const coachFeed = useMemo<CoachFeedItem[]>(() => {
     const items: CoachFeedItem[] = [];
 
-    // 1) Consistency
     if (completedSets.length === 0) {
       items.push({
         title: "Consistency",
@@ -799,7 +791,6 @@ export default function DashboardPage() {
       });
     }
 
-    // 2) Performance
     items.push({
       title: "Performance",
       detail: performanceHighlight
@@ -808,7 +799,6 @@ export default function DashboardPage() {
       tone: "neutral",
     });
 
-    // 3) Motivation
     items.push({
       title: "Momentum",
       detail: "Every logged set sharpens your training signal. Keep stacking sessions.",
@@ -879,7 +869,8 @@ export default function DashboardPage() {
             <p style={eyebrowStyle}>RESPAWN DASHBOARD</p>
             <h1 style={heroTitleStyle}>{displayName}&apos;s AI Coach</h1>
             <p style={heroSubStyle}>
-              A clean read on your consistency, performance highlights, and one next-session suggestion.
+              A clean read on your consistency, performance highlights, and one next-session
+              suggestion.
             </p>
 
             <div style={heroCoachFeedWrapStyle}>
@@ -896,8 +887,8 @@ export default function DashboardPage() {
                           item.tone === "good"
                             ? "1px solid rgba(40, 199, 111, 0.22)"
                             : item.tone === "warn"
-                            ? "1px solid rgba(255, 184, 0, 0.22)"
-                            : "1px solid rgba(255,255,255,0.07)",
+                              ? "1px solid rgba(255, 184, 0, 0.22)"
+                              : "1px solid rgba(255,255,255,0.07)",
                       }}
                     >
                       <div style={heroCoachFeedTitleStyle}>{item.title}</div>
@@ -931,14 +922,14 @@ export default function DashboardPage() {
                   readiness.tone === "good"
                     ? "rgba(40, 199, 111, 0.24)"
                     : readiness.tone === "warn"
-                    ? "rgba(255, 184, 0, 0.24)"
-                    : "rgba(255,255,255,0.10)",
+                      ? "rgba(255, 184, 0, 0.24)"
+                      : "rgba(255,255,255,0.10)",
                 color:
                   readiness.tone === "good"
                     ? "#7CFFB2"
                     : readiness.tone === "warn"
-                    ? "#FFD66B"
-                    : "#d7d7d7",
+                      ? "#FFD66B"
+                      : "#d7d7d7",
               }}
             >
               Readiness: {recommendation.readinessLabel}
@@ -1350,7 +1341,7 @@ const cardStyle: CSSProperties = {
 };
 
 const spanTwoStyle: CSSProperties = {
-  gridColumn: "1 / -1", // mobile-safe: full width without creating implicit columns
+  gridColumn: "1 / -1",
 };
 
 const sectionHeaderStyle: CSSProperties = {

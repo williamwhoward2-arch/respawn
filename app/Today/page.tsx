@@ -116,37 +116,6 @@ export default function TodayPage() {
       </section>
 
       <section style={cardStyle}>
-        <div style={sectionHeaderStyle}>
-          <h2 style={sectionTitle}>AI Workout Builder</h2>
-        </div>
-
-        <p style={sectionSubStyle}>
-          Generate a smart workout and send it straight to your Session Page.
-        </p>
-
-        <p style={bodyCopyStyle}>
-          Once generated, your workout is ready to use right away. You can
-          adjust the session however you want before or during training.
-        </p>
-
-        <div style={featureListStyle}>
-          <div style={featureItemStyle}>
-            <div style={featureBulletStyle} />
-            <span>Start training immediately</span>
-          </div>
-          <div style={featureItemStyle}>
-            <div style={featureBulletStyle} />
-            <span>Edit sets, weight, and reps</span>
-          </div>
-          <div style={featureItemStyle}>
-            <div style={featureBulletStyle} />
-            <span>Add or remove exercises</span>
-          </div>
-          <div style={featureItemStyle}>
-            <div style={featureBulletStyle} />
-            <span>Customize the session to fit your day</span>
-          </div>
-        </div>
 
         <div style={{ marginTop: 20 }}>
           <WorkoutGenerator />

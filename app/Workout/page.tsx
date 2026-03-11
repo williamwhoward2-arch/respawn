@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { exerciseLibrary } from "@/lib/workoutGeneratorData";
 
+
 type SetEntry = {
   weight: string;
   reps: string;
@@ -38,6 +39,7 @@ type Exercise = {
   coachingNote?: string;
   reason?: string;
   notes?: string | null;
+  exerciseCompleted?: boolean;
 };
 
 type LibraryExercise = {
@@ -98,6 +100,7 @@ type SavedWorkoutState = {
   newExerciseName: string;
   newBodyPart: string;
   addExerciseMode: "library" | "custom";
+  activeExerciseId: string | null;
 };
 
 type ConfirmAction = {
@@ -585,7 +588,88 @@ export default function WorkoutPage() {
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [cardioEntries, setCardioEntries] = useState<CardioEntry[]>([]);
   const [historyMap, setHistoryMap] = useState<ExerciseHistoryMap>({});
+const [activeExerciseId, setActiveExerciseId] = useState<string | null>(null);
 
+const activeExerciseIndex = useMemo(() => {
+  if (!activeExerciseId) return exercises.length > 0 ? 0 : -1;
+  return exercises.findIndex((exercise) => exercise.id === activeExerciseId);
+}, [activeExerciseId, exercises]);
+
+const activeExercise =
+  activeExerciseIndex >= 0 ? exercises[activeExerciseIndex] : null;
+
+const completedExerciseCount = useMemo(() => {
+  return exercises.filter((exercise) => exercise.exerciseCompleted).length;
+}, [exercises]);
+
+function getExerciseCompletionSummary(exercise: Exercise) {
+  const completed = exercise.sets.filter((set) => set.completed).length;
+  const total = exercise.sets.length;
+
+  if (exercise.exerciseCompleted) return "Complete";
+  if (total === 0) return "Not started";
+  if (completed === 0) return `${total} sets queued`;
+  return `${completed}/${total} sets done`;
+}
+
+function completeExercise(exerciseIndex: number) {
+  const targetExercise = exercises[exerciseIndex];
+
+  if (!targetExercise) return;
+
+  setExercises((prev) => {
+    const updated = [...prev];
+    const exercise = { ...updated[exerciseIndex] };
+
+    exercise.exerciseCompleted = true;
+    updated[exerciseIndex] = exercise;
+
+    return updated;
+  });
+
+  setActiveExerciseId(null);
+  setStatus(`${targetExercise.name} marked complete.`);
+
+  setTimeout(() => {
+    queueSectionRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }, 80);
+}
+
+
+function moveToNextExercise() {
+  if (activeExerciseIndex < 0) return;
+  const nextIndex = Math.min(exercises.length - 1, activeExerciseIndex + 1);
+  setActiveExerciseId(exercises[nextIndex]?.id ?? null);
+}
+
+function moveToPreviousExercise() {
+  if (activeExerciseIndex < 0) return;
+  const prevIndex = Math.max(0, activeExerciseIndex - 1);
+  setActiveExerciseId(exercises[prevIndex]?.id ?? null);
+}
+
+useEffect(() => {
+  if (exercises.length === 0) {
+    setActiveExerciseId(null);
+    return;
+  }
+
+  if (activeExerciseId === null) {
+    return;
+  }
+
+  const stillExists = exercises.some((exercise) => exercise.id === activeExerciseId);
+
+  if (!stillExists) {
+    const firstIncomplete =
+      exercises.find((exercise) => !exercise.exerciseCompleted) ?? exercises[0];
+
+    setActiveExerciseId(firstIncomplete.id);
+  }
+}, [exercises, activeExerciseId]);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>({
     open: false,
     title: "",
@@ -595,7 +679,7 @@ export default function WorkoutPage() {
   });
 
   const exerciseCardRefs = useRef<Record<string, HTMLElement | null>>({});
-
+  const queueSectionRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     void initializeWorkoutPage();
   }, []);
@@ -621,18 +705,18 @@ export default function WorkoutPage() {
   useEffect(() => {
     if (authLoading || finished) return;
 
-    const draft: SavedWorkoutState = {
-      workoutTitle,
-      exercises,
-      cardioEntries,
-      secondsElapsed,
-      timerRunning: false,
-      libraryChoice,
-      newExerciseName,
-      newBodyPart,
-      addExerciseMode,
-    };
-
+const draft: SavedWorkoutState = {
+  workoutTitle,
+  exercises,
+  cardioEntries,
+  secondsElapsed,
+  timerRunning: false,
+  libraryChoice,
+  newExerciseName,
+  newBodyPart,
+  addExerciseMode,
+  activeExerciseId,
+};
     localStorage.setItem(WORKOUT_DRAFT_KEY, JSON.stringify(draft));
   }, [
     authLoading,
@@ -864,7 +948,7 @@ export default function WorkoutPage() {
     if (savedDraft) {
       try {
         const parsedDraft: SavedWorkoutState = JSON.parse(savedDraft);
-        setWorkoutTitle(parsedDraft.workoutTitle || "TrackYour Session");
+        setWorkoutTitle(parsedDraft.workoutTitle || "Track Your Session");
         setExercises(Array.isArray(parsedDraft.exercises) ? parsedDraft.exercises : []);
         setCardioEntries(Array.isArray(parsedDraft.cardioEntries) ? parsedDraft.cardioEntries : []);
         setSecondsElapsed(parsedDraft.secondsElapsed || 0);
@@ -873,6 +957,7 @@ export default function WorkoutPage() {
         setNewExerciseName(parsedDraft.newExerciseName || "");
         setNewBodyPart(parsedDraft.newBodyPart || "");
         setAddExerciseMode(parsedDraft.addExerciseMode || "library");
+        setActiveExerciseId(parsedDraft.activeExerciseId || null);
         setStatus("Recovered your in-progress workout.");
         setAuthLoading(false);
         return;
@@ -1276,16 +1361,17 @@ export default function WorkoutPage() {
     const defaultWeight = getMostLikelyWeight(cleanName, exercises, historyMap);
     const defaultReps = getMostLikelyReps(cleanName, exercises, historyMap, "8");
 
-    const newExercise: Exercise = {
-      id: makeId(),
-      name: cleanName,
-      bodyPart: cleanBodyPart,
-      sets: [{ weight: defaultWeight, reps: defaultReps, completed: false }],
-      favorite: favoriteExercises.includes(cleanName),
-    };
+const newExercise: Exercise = {
+  id: makeId(),
+  name: cleanName,
+  bodyPart: cleanBodyPart,
+  sets: [{ weight: defaultWeight, reps: defaultReps, completed: false }],
+  favorite: favoriteExercises.includes(cleanName),
+};
 
-    setExercises((prev) => [newExercise, ...prev]);
-    saveCustomExerciseToLibrary(cleanName, cleanBodyPart);
+setExercises((prev) => [newExercise, ...prev]);
+setActiveExerciseId(newExercise.id);
+saveCustomExerciseToLibrary(cleanName, cleanBodyPart);
     pushRecent(cleanName);
     setNewExerciseName("");
     setNewBodyPart("");
@@ -2125,161 +2211,239 @@ export default function WorkoutPage() {
         )}
       </section>
 
-      {exercises.length === 0 ? (
-        <section style={emptyStateCardStyle}>
-          <h2 style={emptyStateTitleStyle}>No exercises added yet</h2>
-          <p style={emptyStateTextStyle}>
-            Start by adding an exercise above. Then log weight, reps, and confirm each completed set.
-          </p>
-        </section>
-      ) : (
-        exercises.map((exercise, index) => (
-          <section
-            key={exercise.id}
-            style={exerciseCardStyle}
-            ref={(node) => {
-              exerciseCardRefs.current[exercise.id] = node;
-            }}
-          >
-            <div style={exerciseTopRowStyle}>
-              <div>
-                <h2 style={exerciseTitleStyle}>{exercise.name}</h2>
-                <p style={exerciseBodyPartStyle}>{exercise.bodyPart}</p>
-              </div>
+      <section
+        style={cardStyle}
+        ref={(node) => {
+          queueSectionRef.current = node;
+        }}
+      >
+        <div style={sectionHeaderStyle}>
+          <h2 style={sectionTitle}>Workout Queue</h2>
+        </div>
 
-              <div style={buttonRowStyle}>
+        <div style={queueSummaryStyle}>
+          <div style={queueSummaryPillStyle}>
+            {completedExerciseCount}/{exercises.length} exercises complete
+          </div>
+          {activeExercise ? (
+            <div style={queueSummaryActiveStyle}>Active: {activeExercise.name}</div>
+          ) : null}
+        </div>
+
+        {exercises.length === 0 ? (
+          <p style={mutedStyle}>Add exercises above to build your workout queue.</p>
+        ) : (
+          <div style={queueListStyle}>
+            {exercises.map((exercise) => {
+              const isActive = exercise.id === activeExerciseId;
+              const summary = getExerciseCompletionSummary(exercise);
+
+              return (
                 <button
-                  onClick={() => toggleFavorite(exercise.name)}
-                  style={secondaryButtonStyle}
+                  key={exercise.id}
+                  onClick={() => setActiveExerciseId(exercise.id)}
+                  style={isActive ? queueItemActiveStyle : queueItemStyle}
                 >
-                  {favoriteExercises.includes(exercise.name) ? "Unfavorite" : "Favorite"}
-                </button>
-                <button
-                  onClick={() => resetExerciseSets(index)}
-                  style={secondaryButtonStyle}
-                >
-                  Reset Sets
-                </button>
-                <button onClick={() => removeExercise(index)} style={dangerButtonStyle}>
-                  Remove
-                </button>
-              </div>
-            </div>
-
-            {!!exercise.restSeconds && (
-              <div style={restTagStyle}>
-                Recommended rest: {formatRestLabel(exercise.restSeconds)}
-              </div>
-            )}
-
-            {(exercise.coachingNote ||
-              exercise.reason ||
-              exercise.notes ||
-              exercise.repRange) && (
-              <div style={exerciseInfoCardStyle}>
-                {exercise.repRange && (
-                  <div style={exerciseInfoLineStyle}>
-                    Target rep range: {exercise.repRange}
-                  </div>
-                )}
-                {exercise.coachingNote && (
-                  <div style={exerciseInfoLineStyle}>{exercise.coachingNote}</div>
-                )}
-                {exercise.reason && (
-                  <div style={exerciseMutedLineStyle}>{exercise.reason}</div>
-                )}
-                {exercise.notes && (
-                  <div style={exerciseSpecialLineStyle}>{exercise.notes}</div>
-                )}
-              </div>
-            )}
-
-            <div style={{ marginTop: 18 }}>
-              <h3 style={setsHeaderStyle}>Sets</h3>
-
-              {exercise.sets.map((set, setIndex) => {
-                const suggestion = buildProgressionSuggestion(
-                  exercise,
-                  setIndex,
-                  exercises,
-                  historyMap
-                );
-
-                return (
-                  <div key={setIndex} style={setBlockStyle}>
-                    <div style={editableSetRowStyle}>
-                      <span style={setNumberStyle}>Set {setIndex + 1}</span>
-
-                      <input
-                        placeholder="Weight"
-                        value={set.weight}
-                        onChange={(e) =>
-                          updateSetField(index, setIndex, "weight", e.target.value)
-                        }
-                        style={smallInputStyle}
-                        inputMode="decimal"
-                      />
-
-                      <input
-                        placeholder="Reps"
-                        value={set.reps}
-                        onChange={(e) =>
-                          updateSetField(index, setIndex, "reps", e.target.value)
-                        }
-                        style={smallInputStyle}
-                        inputMode="numeric"
-                      />
-
-                      <button
-                        onClick={() => toggleSetCompleted(index, setIndex)}
-                        style={set.completed ? completeButtonActiveStyle : completeButtonStyle}
-                      >
-                        {set.completed ? "Completed" : "Complete Set"}
-                      </button>
-
-                      <button
-                        onClick={() => applySuggestionToSet(index, setIndex)}
-                        style={secondaryButtonStyle}
-                      >
-                        Apply AI
-                      </button>
-
-                      <button
-                        onClick={() => resetSetValues(index, setIndex)}
-                        style={secondaryButtonStyle}
-                      >
-                        Reset Values
-                      </button>
-
-                      <button
-                        onClick={() => removeSet(index, setIndex)}
-                        style={dangerButtonStyle}
-                      >
-                        Remove Set
-                      </button>
-                    </div>
-
-                    <div style={aiHintCardStyle}>
-                      <span style={aiHintTitleStyle}>
-                        AI Suggestion: {suggestion.weight || "-"} lbs × {suggestion.reps}
-                      </span>
-                      <span style={aiHintTextStyle}>{suggestion.reason}</span>
+                  <div style={queueItemLeftStyle}>
+                    <div style={queueItemTitleStyle}>{exercise.name}</div>
+                    <div style={queueItemSubStyle}>
+                      {exercise.bodyPart} • {exercise.sets.length} sets
+                      {exercise.repRange ? ` • ${exercise.repRange}` : ""}
                     </div>
                   </div>
-                );
-              })}
-            </div>
 
-            <div style={{ marginTop: 14 }}>
-              <button onClick={() => addSet(index)} style={primaryButtonStyle}>
-                Add Set
+                  <div style={queueItemRightStyle}>
+                    <div style={queueStatusStyle}>{summary}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+{exercises.length === 0 ? (
+  <section style={emptyStateCardStyle}>
+    <h2 style={emptyStateTitleStyle}>No exercises added yet</h2>
+    <p style={emptyStateTextStyle}>
+      Start by adding an exercise above. Then log weight, reps, and confirm each completed set.
+    </p>
+  </section>
+) : activeExercise && activeExerciseIndex >= 0 ? (
+  <section
+    key={activeExercise.id}
+    style={exerciseCardStyle}
+  >
+    <div style={exerciseTopRowStyle}>
+      <div>
+        <h2 style={exerciseTitleStyle}>{activeExercise.name}</h2>
+        <p style={exerciseBodyPartStyle}>{activeExercise.bodyPart}</p>
+      </div>
+
+      <div style={buttonRowStyle}>
+        <button
+          onClick={() => toggleFavorite(activeExercise.name)}
+          style={secondaryButtonStyle}
+        >
+          {favoriteExercises.includes(activeExercise.name) ? "Unfavorite" : "Favorite"}
+        </button>
+        <button
+          onClick={() => resetExerciseSets(activeExerciseIndex)}
+          style={secondaryButtonStyle}
+        >
+          Reset Sets
+        </button>
+        <button
+          onClick={() => removeExercise(activeExerciseIndex)}
+          style={dangerButtonStyle}
+        >
+          Remove
+        </button>
+      </div>
+    </div>
+
+    {!!activeExercise.restSeconds && (
+      <div style={restTagStyle}>
+        Recommended rest: {formatRestLabel(activeExercise.restSeconds)}
+      </div>
+    )}
+
+    {(activeExercise.coachingNote ||
+      activeExercise.reason ||
+      activeExercise.notes ||
+      activeExercise.repRange) && (
+      <div style={exerciseInfoCardStyle}>
+        {activeExercise.repRange && (
+          <div style={exerciseInfoLineStyle}>
+            Target rep range: {activeExercise.repRange}
+          </div>
+        )}
+        {activeExercise.coachingNote && (
+          <div style={exerciseInfoLineStyle}>{activeExercise.coachingNote}</div>
+        )}
+        {activeExercise.reason && (
+          <div style={exerciseMutedLineStyle}>{activeExercise.reason}</div>
+        )}
+        {activeExercise.notes && (
+          <div style={exerciseSpecialLineStyle}>{activeExercise.notes}</div>
+        )}
+      </div>
+    )}
+
+    <div style={exerciseNavRowStyle}>
+      <button
+        onClick={moveToPreviousExercise}
+        style={secondaryButtonStyle}
+        disabled={activeExerciseIndex === 0}
+      >
+        Previous Exercise
+      </button>
+
+      <div style={exerciseNavMetaStyle}>
+        Exercise {activeExerciseIndex + 1} of {exercises.length}
+      </div>
+
+      <button
+        onClick={moveToNextExercise}
+        style={secondaryButtonStyle}
+        disabled={activeExerciseIndex === exercises.length - 1}
+      >
+        Next Exercise
+      </button>
+    </div>
+
+    <div style={{ marginTop: 18 }}>
+      <h3 style={setsHeaderStyle}>Sets</h3>
+
+      {activeExercise.sets.map((set, setIndex) => {
+        const suggestion = buildProgressionSuggestion(
+          activeExercise,
+          setIndex,
+          exercises,
+          historyMap
+        );
+
+        return (
+          <div key={setIndex} style={setBlockStyle}>
+            <div style={editableSetRowStyle}>
+              <span style={setNumberStyle}>Set {setIndex + 1}</span>
+
+              <input
+                placeholder="Weight"
+                value={set.weight}
+                onChange={(e) =>
+                  updateSetField(activeExerciseIndex, setIndex, "weight", e.target.value)
+                }
+                style={smallInputStyle}
+                inputMode="decimal"
+              />
+
+              <input
+                placeholder="Reps"
+                value={set.reps}
+                onChange={(e) =>
+                  updateSetField(activeExerciseIndex, setIndex, "reps", e.target.value)
+                }
+                style={smallInputStyle}
+                inputMode="numeric"
+              />
+
+              <button
+                onClick={() => toggleSetCompleted(activeExerciseIndex, setIndex)}
+                style={set.completed ? completeButtonActiveStyle : completeButtonStyle}
+              >
+                {set.completed ? "Completed" : "Complete Set"}
+              </button>
+
+              <button
+                onClick={() => applySuggestionToSet(activeExerciseIndex, setIndex)}
+                style={secondaryButtonStyle}
+              >
+                Apply AI
+              </button>
+
+              <button
+                onClick={() => resetSetValues(activeExerciseIndex, setIndex)}
+                style={secondaryButtonStyle}
+              >
+                Reset Values
+              </button>
+
+              <button
+                onClick={() => removeSet(activeExerciseIndex, setIndex)}
+                style={dangerButtonStyle}
+              >
+                Remove Set
               </button>
             </div>
-          </section>
-        ))
-      )}
 
-      {confirmAction.open && (
+            <div style={aiHintCardStyle}>
+              <span style={aiHintTitleStyle}>
+                AI Suggestion: {suggestion.weight || "-"} lbs × {suggestion.reps}
+              </span>
+              <span style={aiHintTextStyle}>{suggestion.reason}</span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+
+  <div style={{ marginTop: 14, display: "flex", gap: "10px", flexWrap: "wrap" }}>
+  <button onClick={() => addSet(activeExerciseIndex)} style={primaryButtonStyle}>
+    Add Set
+  </button>
+
+  <button
+    onClick={() => completeExercise(activeExerciseIndex)}
+    style={completeExerciseButtonStyle}
+  >
+    Complete Exercise
+  </button>
+</div>
+  </section>
+) : null}
+
+{confirmAction.open && (
         <div style={confirmOverlayStyle}>
           <div style={confirmCardStyle}>
             <h3 style={confirmTitleStyle}>{confirmAction.title}</h3>
@@ -2656,6 +2820,17 @@ const completeButtonActiveStyle: CSSProperties = {
   cursor: "pointer",
 };
 
+const completeExerciseButtonStyle: CSSProperties = {
+  backgroundColor: "#1f3b2d",
+  border: "1px solid #2f5a43",
+  padding: "10px 16px",
+  borderRadius: "10px",
+  color: "white",
+  fontWeight: 800,
+  cursor: "pointer",
+};
+
+
 const exerciseTopRowStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
@@ -2878,4 +3053,99 @@ const confirmMessageStyle: CSSProperties = {
   color: "#bdbdbd",
   fontSize: "14px",
   lineHeight: 1.5,
+};
+const queueSummaryStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "10px",
+  flexWrap: "wrap",
+  marginBottom: "14px",
+};
+
+const queueSummaryPillStyle: CSSProperties = {
+  background: "rgba(255,255,255,0.05)",
+  border: "1px solid rgba(255,255,255,0.08)",
+  borderRadius: "999px",
+  padding: "8px 12px",
+  color: "#ffffff",
+  fontSize: "12px",
+  fontWeight: 800,
+};
+
+const queueSummaryActiveStyle: CSSProperties = {
+  color: "#bdbdbd",
+  fontSize: "13px",
+  fontWeight: 700,
+};
+
+const queueListStyle: CSSProperties = {
+  display: "grid",
+  gap: "10px",
+};
+
+const queueItemStyle: CSSProperties = {
+  width: "100%",
+  background: "rgba(255,255,255,0.03)",
+  border: "1px solid rgba(255,255,255,0.06)",
+  borderRadius: "16px",
+  padding: "14px",
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "12px",
+  textAlign: "left",
+  cursor: "pointer",
+  color: "#ffffff",
+};
+
+const queueItemActiveStyle: CSSProperties = {
+  ...queueItemStyle,
+  background: "rgba(255,26,26,0.10)",
+  border: "1px solid rgba(255,77,77,0.35)",
+};
+
+const queueItemLeftStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "4px",
+  minWidth: 0,
+};
+
+const queueItemTitleStyle: CSSProperties = {
+  color: "#ffffff",
+  fontSize: "15px",
+  fontWeight: 800,
+};
+
+const queueItemSubStyle: CSSProperties = {
+  color: "#a9a9a9",
+  fontSize: "12px",
+  lineHeight: 1.4,
+};
+
+const queueItemRightStyle: CSSProperties = {
+  flexShrink: 0,
+};
+
+const queueStatusStyle: CSSProperties = {
+  color: "#ffb8b8",
+  fontSize: "12px",
+  fontWeight: 800,
+};
+
+const exerciseNavRowStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "10px",
+  flexWrap: "wrap",
+  marginTop: "16px",
+  padding: "12px 0 4px",
+};
+
+const exerciseNavMetaStyle: CSSProperties = {
+  color: "#bdbdbd",
+  fontSize: "13px",
+  fontWeight: 700,
 };
