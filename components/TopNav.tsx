@@ -10,6 +10,7 @@ const navItems = [
   { label: "Build", href: "/Today" },
   { label: "Track", href: "/Workout" },
   { label: "Progress", href: "/Progress" },
+  { label: "Nutrition", href: "/Nutrition" },
   { label: "Profile", href: "/Profile" },
 ];
 
